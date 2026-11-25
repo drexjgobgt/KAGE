@@ -24,7 +24,7 @@ interface LibraryViewProps {
   selectedPaths: ReadonlySet<string>;
   selectMode: boolean;
   onToggleSelectMode: () => void;
-  onSelectClip: (clip: ClipMetadata, mods: { ctrl: boolean; shift: boolean }) => void;
+  onSelectClip: (clip: ClipMetadata, mods: { ctrl: boolean; shift: boolean }, visibleOrder: string[]) => void;
   onSelectAll: (clips: ClipMetadata[]) => void;
   onClearSelection: () => void;
   onOpenClip: (clip: ClipMetadata) => void;
@@ -78,16 +78,22 @@ export function LibraryView({
     for (const c of clips) {
       if (c.game) set.add(c.game);
     }
+    if (gallery.gameFilter !== "all" && gallery.gameFilter) {
+      set.add(gallery.gameFilter);
+    }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [clips]);
+  }, [clips, gallery.gameFilter]);
 
   const tags = useMemo(() => {
     const set = new Set<string>();
     for (const c of clips) {
       for (const t of c.tags) set.add(t);
     }
+    if (gallery.tagFilter) {
+      set.add(gallery.tagFilter);
+    }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [clips]);
+  }, [clips, gallery.tagFilter]);
 
   const filtered = useMemo(() => {
     const q = gallery.query.trim().toLowerCase();
@@ -124,6 +130,7 @@ export function LibraryView({
     () => filtered.reduce((acc, c) => acc + c.size_bytes, 0),
     [filtered],
   );
+  const visibleOrder = useMemo(() => filtered.map((c) => c.path), [filtered]);
 
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -143,7 +150,7 @@ export function LibraryView({
             type="button"
             onClick={onRefresh}
             aria-label="Refresh clip list"
-            className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#282320] bg-[#12100E] px-3 py-1.5 text-xs font-medium text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4]"
+            className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#6E655E] bg-[#12100E] px-3 py-1.5 text-xs font-medium text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
           >
             <IconRefresh className="h-3.5 w-3.5" />
             <span>Refresh</span>
@@ -151,14 +158,16 @@ export function LibraryView({
 
           <button
             type="button"
+            aria-pressed={gallery.compact}
             onClick={() => onGalleryChange({ compact: !gallery.compact })}
-            className="rounded-[8px] border border-[#282320] bg-[#12100E] px-3 py-1.5 text-xs font-medium text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4]"
+            className="rounded-[8px] border border-[#6E655E] bg-[#12100E] px-3 py-1.5 text-xs font-medium text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
           >
             {gallery.compact ? "Comfort Grid" : "Compact Grid"}
           </button>
 
           <button
             type="button"
+            aria-pressed={selectMode}
             onClick={onToggleSelectMode}
             className={`inline-flex items-center gap-1.5 rounded-[8px] border px-3 py-1.5 text-xs font-medium transition-colors ${
               selectMode
@@ -183,30 +192,32 @@ export function LibraryView({
               onChange={(e) => onGalleryChange({ query: e.target.value })}
               placeholder="Search title, game, or tag..."
               aria-label="Search clips"
-              className="w-full rounded-[8px] border border-[#282320] bg-[#0A0908] py-1.5 pl-8 pr-3 text-xs text-[#F3ECE4] placeholder:text-[#94897E] focus:border-[#E6C29F] focus:outline-none"
+              className="w-full rounded-[8px] border border-[#6E655E] bg-[#0A0908] py-1.5 pl-8 pr-3 text-xs text-[#F3ECE4] placeholder:text-[#94897E] focus:border-[#E6C29F] focus:outline-none"
             />
           </div>
 
           <button
             type="button"
+            aria-pressed={gallery.favOnly}
             onClick={() => onGalleryChange({ favOnly: !gallery.favOnly })}
             className={`inline-flex items-center gap-1.5 rounded-[8px] border px-3 py-1.5 text-xs font-medium transition-colors ${
               gallery.favOnly
                 ? "border-[#E6C29F] bg-[#241D15] text-[#E6C29F]"
-                : "border-[#282320] bg-[#0A0908] text-[#B5AA9F] hover:border-[#6E655E]"
+                : "border-[#6E655E] bg-[#0A0908] text-[#B5AA9F] hover:border-[#E6C29F]"
             }`}
           >
             <IconStar filled={gallery.favOnly} className="h-3.5 w-3.5" />
-            <span>Favourites</span>
+            <span>Favorites</span>
           </button>
 
           <button
             type="button"
+            aria-pressed={gallery.audioOnly}
             onClick={() => onGalleryChange({ audioOnly: !gallery.audioOnly })}
             className={`rounded-[8px] border px-3 py-1.5 text-xs font-medium transition-colors ${
               gallery.audioOnly
                 ? "border-[#E6C29F] bg-[#241D15] text-[#E6C29F]"
-                : "border-[#282320] bg-[#0A0908] text-[#B5AA9F] hover:border-[#6E655E]"
+                : "border-[#6E655E] bg-[#0A0908] text-[#B5AA9F] hover:border-[#E6C29F]"
             }`}
           >
             With Audio
@@ -216,7 +227,7 @@ export function LibraryView({
             value={gallery.gameFilter}
             onChange={(e) => onGalleryChange({ gameFilter: e.target.value })}
             aria-label="Filter by game"
-            className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+            className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
           >
             <option value="all">All Games</option>
             {games.map((g) => (
@@ -233,7 +244,7 @@ export function LibraryView({
                 onGalleryChange({ tagFilter: e.target.value ? e.target.value : null })
               }
               aria-label="Filter by tag"
-              className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+              className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
             >
               <option value="">All Tags</option>
               {tags.map((t) => (
@@ -248,7 +259,7 @@ export function LibraryView({
             value={gallery.sortKey}
             onChange={(e) => onGalleryChange({ sortKey: e.target.value as SortKey })}
             aria-label="Sort clips"
-            className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+            className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
           >
             <option value="newest">Newest First</option>
             <option value="oldest">Oldest First</option>
@@ -310,6 +321,7 @@ export function LibraryView({
 
               <button
                 type="button"
+                aria-expanded={showTagInput}
                 onClick={() => setShowTagInput((s) => !s)}
                 className="inline-flex items-center gap-1 rounded-[6px] border border-[#6E655E] bg-[#12100E] px-2.5 py-1 text-[#F3ECE4] hover:border-[#E6C29F]"
               >
@@ -384,7 +396,7 @@ export function LibraryView({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => void kage.openOutputFolder()}
+                onClick={() => void kage.openOutputFolder().catch(() => {})}
                 className="rounded-[8px] border border-[#6E655E] bg-[#1A1715] px-3 py-1.5 text-xs text-[#F3ECE4]"
               >
                 Open Folder
@@ -411,7 +423,7 @@ export function LibraryView({
           selectedPaths={selectedPaths}
           selectMode={selectMode}
           onOpen={onOpenClip}
-          onSelect={onSelectClip}
+          onSelect={(clip, mods) => onSelectClip(clip, mods, visibleOrder)}
           onCopy={onCopyClip}
           onReveal={onRevealClip}
           onOpenExternal={onOpenExternalClip}

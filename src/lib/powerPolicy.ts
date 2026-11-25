@@ -1,5 +1,5 @@
 /**
- * Adaptive capture (ECO) policy — pure and unit-testable.
+ * Adaptive capture (ECO) policy (pure and unit-testable).
  *
  * The deck polls `getPowerState()` every few seconds and runs `decideEco`
  * over the snapshot. When the machine is on battery below the configured
@@ -63,7 +63,7 @@ export function decideEco(power: PowerState, settings: EcoInput): EcoDecision {
 
 /**
  * Stability gate for the ECO *active* boolean. The buffer only changes once the
- * desired state has held for the whole window — in either direction, so a RAM
+ * desired state has held for the whole window in either direction, so a RAM
  * blip can't shrink the buffer for a few seconds and restore it again.
  */
 export class EcoHysteresis {

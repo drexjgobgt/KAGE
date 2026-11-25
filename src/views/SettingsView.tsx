@@ -3,19 +3,22 @@ import { formatBytes } from "../lib/format";
 import type {
   AppSettings,
   AudioDevice,
+  EngineStats,
   MonitorInfo,
   PowerState,
 } from "../lib/types";
-import { IconFolder, IconMonitor } from "../components/Icons";
+import { IconFolder, IconMonitor, IconRefresh } from "../components/Icons";
 
 interface SettingsViewProps {
   settings: AppSettings;
+  stats: EngineStats;
   monitors: MonitorInfo[];
   audioDevices: AudioDevice[];
   powerNow: PowerState | null;
   diskFreeBytes: number | null;
   busy: boolean;
   onPatchSettings: (patch: Partial<AppSettings>) => void;
+  onRestartEngine: () => void;
   onChooseOutputFolder: () => void;
   onOpenOutputFolder: () => void;
   onCleanupNow: () => void;
@@ -29,12 +32,22 @@ function formatKeyEvent(e: React.KeyboardEvent): string | null {
   if (e.altKey) mods.push("Alt");
   if (e.shiftKey) mods.push("Shift");
   if (e.metaKey) mods.push("Win");
-  const raw = e.key;
-  if (["Control", "Alt", "Shift", "Meta"].includes(raw) || mods.length === 0) {
+  if (["Control", "Alt", "Shift", "Meta"].includes(e.key) || mods.length === 0) {
     return null;
   }
-  let main = raw.length === 1 ? raw.toUpperCase() : raw;
-  if (raw.startsWith("F") && raw.length <= 3) main = raw.toUpperCase();
+
+  let main: string;
+  if (/^Key[A-Z]$/.test(e.code)) {
+    main = e.code.slice(3);
+  } else if (/^Digit[0-9]$/.test(e.code)) {
+    main = e.code.slice(5);
+  } else if (e.code === "Space") {
+    main = "Space";
+  } else if (/^F\d{1,2}$/.test(e.code)) {
+    main = e.code;
+  } else {
+    main = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+  }
   return [...mods, main].join("+");
 }
 
@@ -67,18 +80,30 @@ function ToggleRow({
 
 export function SettingsView({
   settings,
+  stats,
   monitors,
   audioDevices,
   powerNow,
   diskFreeBytes,
   busy,
   onPatchSettings,
+  onRestartEngine,
   onChooseOutputFolder,
   onOpenOutputFolder,
   onCleanupNow,
 }: SettingsViewProps) {
   const [capturing, setCapturing] = useState<HotkeyField | null>(null);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
+
+  const engineRunning = stats.state !== "idle";
+  const needsEngineRestart =
+    engineRunning &&
+    (stats.target_fps !== settings.targetFps ||
+      Math.round(stats.bitrate_kbps) !== Math.round(settings.bitrateKbps) ||
+      stats.encoder.codec.toLowerCase() !== settings.codec ||
+      stats.performance_mode !== settings.performanceMode ||
+      stats.audio_system !== settings.captureSystemAudio ||
+      stats.audio_mic !== settings.captureMicrophone);
 
   const assignHotkey = (field: HotkeyField, combo: string) => {
     const others: HotkeyField[] = (["hotkeySave", "hotkeyRecord", "hotkeyToggle"] as const).filter(
@@ -108,7 +133,30 @@ export function SettingsView({
         </p>
       </div>
 
-      {/* Hotkeys */}
+      {needsEngineRestart && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-[#F5B971]/60 bg-[#1B1610] px-4 py-3 text-xs"
+        >
+          <div>
+            <span className="font-semibold text-[#F5B971]">Restart Engine Required: </span>
+            <span className="text-[#F3ECE4]">
+              New FPS, bitrate, codec, or audio routing changes apply after restarting capture.
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRestartEngine}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#E6C29F] px-3.5 py-1.5 text-xs font-semibold text-[#0A0908] hover:bg-[#F0D2B4] disabled:opacity-50"
+          >
+            <IconRefresh className="h-3.5 w-3.5" />
+            <span>Restart Engine</span>
+          </button>
+        </div>
+      )}
+
+      {/* Global Shortcuts */}
       <section aria-label="Global Hotkeys" className="bezel-outer">
         <div className="bezel-inner flex flex-col gap-3 p-5">
           <div>
@@ -119,7 +167,10 @@ export function SettingsView({
           </div>
 
           {hotkeyError && (
-            <div className="rounded-[8px] border border-[#FF6B6F]/50 bg-[#241112] px-3 py-2 text-xs text-[#FF6B6F]">
+            <div
+              role="alert"
+              className="rounded-[8px] border border-[#FF6B6F]/50 bg-[#241112] px-3 py-2 text-xs text-[#FF6B6F]"
+            >
               {hotkeyError}
             </div>
           )}
@@ -245,7 +296,7 @@ export function SettingsView({
               <div
                 role="group"
                 aria-label="Target frame rate"
-                className="grid grid-cols-3 gap-1.5 rounded-[10px] border border-[#282320] bg-[#0A0908] p-1"
+                className="grid h-[38px] grid-cols-3 gap-1.5 rounded-[10px] border border-[#6E655E] bg-[#0A0908] p-1"
               >
                 {[
                   { fps: 30, hint: "Light" },
@@ -259,7 +310,7 @@ export function SettingsView({
                       type="button"
                       aria-pressed={selected}
                       onClick={() => onPatchSettings({ targetFps: fps })}
-                      className={`rounded-[7px] px-2 py-1.5 text-center font-mono text-xs transition-colors ${
+                      className={`rounded-[7px] px-2 text-center font-mono text-xs transition-colors ${
                         selected
                           ? "border border-[#E6C29F] bg-[#241D15] font-semibold text-[#E6C29F]"
                           : "border border-transparent text-[#B5AA9F] hover:bg-[#141210] hover:text-[#F3ECE4]"
@@ -282,7 +333,7 @@ export function SettingsView({
                 onChange={(e) =>
                   onPatchSettings({ codec: e.target.value as "h264" | "hevc" })
                 }
-                className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-3 py-2 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                className="h-[38px] rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-3 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
               >
                 <option value="h264">H.264 (Maximum Discord / Editor compatibility)</option>
                 <option value="hevc">HEVC / H.265 (Smaller file footprint)</option>
@@ -301,11 +352,13 @@ export function SettingsView({
                 onChange={(e) =>
                   onPatchSettings({ monitorIndex: Number(e.target.value) })
                 }
-                className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-3 py-2 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                className="h-[38px] rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-3 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
               >
                 {monitors.map((m) => (
                   <option key={m.index} value={m.index}>
-                    {m.name} ({m.width}x{m.height} {m.refresh_hz}Hz{m.primary ? ", Primary" : ""})
+                    {m.name} ({m.width}x{m.height}
+                    {m.refresh_hz > 0 ? ` ${m.refresh_hz}Hz` : ""}
+                    {m.primary ? ", Primary" : ""})
                   </option>
                 ))}
               </select>
@@ -331,7 +384,7 @@ export function SettingsView({
             <div className="divide-y divide-[#282320]">
               <ToggleRow
                 label="Capture System / Game Audio"
-                hint="Zero-copy WASAPI desktop loopback into AAC stereo track."
+                hint="Captures desktop and game sound into the AAC stereo mix."
                 checked={settings.captureSystemAudio}
                 onChange={(v) => onPatchSettings({ captureSystemAudio: v })}
               />
@@ -352,7 +405,7 @@ export function SettingsView({
                     micDeviceId: e.target.value ? e.target.value : null,
                   })
                 }
-                className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-3 py-2 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                className="h-[38px] rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-3 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
               >
                 <option value="">Windows Default Communications / Capture</option>
                 {audioDevices.map((d) => (
@@ -393,7 +446,7 @@ export function SettingsView({
               <button
                 type="button"
                 onClick={onOpenOutputFolder}
-                className="rounded-[8px] border border-[#282320] bg-[#12100E] px-3 py-1.5 text-xs text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4]"
+                className="rounded-[8px] border border-[#6E655E] bg-[#12100E] px-3 py-1.5 text-xs text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
               >
                 Open in Explorer
               </button>
@@ -401,7 +454,7 @@ export function SettingsView({
                 type="button"
                 disabled={busy || settings.autoCleanupDays <= 0}
                 onClick={onCleanupNow}
-                className="rounded-[8px] border border-[#282320] bg-[#12100E] px-3 py-1.5 text-xs text-[#B5AA9F] hover:border-[#6E655E] disabled:opacity-40"
+                className="rounded-[8px] border border-[#6E655E] bg-[#12100E] px-3 py-1.5 text-xs text-[#B5AA9F] hover:border-[#E6C29F] disabled:opacity-40"
               >
                 Run Cleanup Now
               </button>
@@ -419,10 +472,15 @@ export function SettingsView({
                 min={0}
                 max={365}
                 value={settings.autoCleanupDays}
-                onChange={(e) =>
-                  onPatchSettings({ autoCleanupDays: Number(e.target.value) })
-                }
-                className="w-20 rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 text-right font-mono text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  onPatchSettings({
+                    autoCleanupDays: Number.isFinite(n)
+                      ? Math.min(365, Math.max(0, Math.round(n)))
+                      : 0,
+                  });
+                }}
+                className="w-20 rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 text-right font-mono text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
               />
             </label>
 
@@ -483,6 +541,46 @@ export function SettingsView({
               checked={settings.adaptiveEco}
               onChange={(v) => onPatchSettings({ adaptiveEco: v })}
             />
+            {settings.adaptiveEco && (
+              <div className="grid gap-3 py-3 sm:grid-cols-2">
+                <label className="flex items-center justify-between gap-3 rounded-[8px] border border-[#282320] bg-[#0D0B0A] px-3 py-2 text-xs">
+                  <span className="text-[#B5AA9F]">Battery threshold (%)</span>
+                  <input
+                    type="number"
+                    min={5}
+                    max={90}
+                    value={settings.ecoBatteryThresholdPct}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      onPatchSettings({
+                        ecoBatteryThresholdPct: Number.isFinite(n)
+                          ? Math.min(90, Math.max(5, Math.round(n)))
+                          : 30,
+                      });
+                    }}
+                    className="w-20 rounded-[6px] border border-[#6E655E] bg-[#0A0908] px-2 py-1 text-right font-mono text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-3 rounded-[8px] border border-[#282320] bg-[#0D0B0A] px-3 py-2 text-xs">
+                  <span className="text-[#B5AA9F]">Min free RAM (GB)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={64}
+                    value={settings.ecoRamFreeGbs}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      onPatchSettings({
+                        ecoRamFreeGbs: Number.isFinite(n)
+                          ? Math.min(64, Math.max(1, Math.round(n)))
+                          : 4,
+                      });
+                    }}
+                    className="w-20 rounded-[6px] border border-[#6E655E] bg-[#0A0908] px-2 py-1 text-right font-mono text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                  />
+                </label>
+              </div>
+            )}
             <ToggleRow
               label="Minimize to System Tray on Close"
               hint="Trims WebView working-set pages when hidden so idle RAM drops sharply."
@@ -511,7 +609,7 @@ export function SettingsView({
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#282320] pt-3 text-xs text-[#94897E]">
             <span>KAGE Studio v2.0.0</span>
-            <span>100% offline local engine / zero telemetry / zero background network calls</span>
+            <span>Local capture engine without cloud uploads or telemetry.</span>
           </div>
         </div>
       </section>

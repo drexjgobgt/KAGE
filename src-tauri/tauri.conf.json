@@ -31,7 +31,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "csp": "default-src 'self'; font-src 'self' data:; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'",
       "assetProtocol": {
         "enable": true,
         "scope": ["$VIDEO/KAGE/**", "$HOME/Videos/KAGE/**", "$APPDATA/KAGE/thumbs/**"]
@@ -58,6 +58,6 @@
       }
     },
     "shortDescription": "Lightweight instant replay and direct capture studio for Windows",
-    "longDescription": "KAGE keeps the last 15 to 120 seconds of your screen in a GPU-encoded rolling memory buffer (Alt + C) and streams direct MP4 recordings straight to disk (Alt + R) with zero cloud, zero telemetry, and minimal memory overhead."
+    "longDescription": "KAGE keeps the last 15 to 300 seconds of your screen in a GPU-encoded rolling memory buffer (Alt + C) and streams direct MP4 recordings straight to disk (Alt + R) with zero cloud, zero telemetry, and minimal memory overhead."
   }
 }

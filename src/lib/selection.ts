@@ -1,7 +1,7 @@
 /**
  * Pure multi-selection state for the clip gallery (file-manager semantics).
  *
- * The reducer never touches the DOM or the backend — App feeds it the current
+ * The reducer never touches the DOM or the backend; App feeds it the current
  * visible clip order (the `filtered` list) and a click action; it returns the
  * next selection. That keeps Ctrl/Shift range logic unit-testable.
  *
@@ -10,7 +10,7 @@
  */
 
 export interface SelectionState {
-  /** The last clicked path — shift-clicks extend the range from it. */
+  /** The last clicked path (shift-clicks extend the range from it). */
   anchor: string | null;
   /** Selected clip paths, in click order. */
   selected: string[];

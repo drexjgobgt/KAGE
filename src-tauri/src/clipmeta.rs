@@ -1,13 +1,8 @@
-//! Per-clip user metadata (favourites + custom tags).
-//!
-//! Clips are plain files on disk, so this data cannot live inside them. It is
-//! kept in a tiny sidecar JSON in the ClipFlow app-data folder, keyed by the
-//! absolute clip path, so it survives restarts and stays 100% local — no
-//! cloud, no account, no telemetry. The gallery scan merges it on every
-//! refresh and prunes entries whose clip has been deleted.
+//! Persistent per-clip favourites and tags stored locally as JSON.
+//! Kept in `%APPDATA%\KAGE\clip_meta.json`, keyed by absolute clip path.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -69,7 +64,17 @@ impl ClipMetaStore {
             entries: self.entries.clone(),
         })
         .map_err(|e| e.to_string())?;
-        std::fs::write(&self.path, json).map_err(|e| e.to_string())
+        let tmp = self
+            .path
+            .with_extension(format!("json.tmp.{}", std::process::id()));
+        std::fs::write(&tmp, json).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            e.to_string()
+        })?;
+        std::fs::rename(&tmp, &self.path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            e.to_string()
+        })
     }
 
     pub fn get(&self, path: &str) -> ClipMetaEntry {
@@ -159,14 +164,29 @@ impl ClipMetaStore {
         }
     }
 
-    /// Applies stored metadata onto a scanned clip list (matched by absolute
-    /// path) and prunes entries whose clip no longer exists on disk. Runs
-    /// inside the gallery scan so the UI always gets one consistent snapshot.
-    pub fn merge_into(&mut self, clips: &mut [ClipMetadata]) {
+    /// Applies stored metadata onto a scanned clip list and prunes only entries
+    /// whose path belongs to `root_dir` when that directory is currently online.
+    /// Clips under other folders or temporarily disconnected drives stay intact.
+    pub fn merge_into(&mut self, root_dir: &Path, clips: &mut [ClipMetadata]) {
         let live: std::collections::HashSet<String> =
             clips.iter().map(|c| c.path.clone()).collect();
+        let dir_online = root_dir.is_dir();
         let before = self.entries.len();
-        self.entries.retain(|path, _| live.contains(path));
+        if dir_online {
+            let norm_root = root_dir.to_string_lossy().to_ascii_lowercase();
+            let norm_prefix = if norm_root.ends_with('\\') || norm_root.ends_with('/') {
+                norm_root
+            } else {
+                format!("{norm_root}\\")
+            };
+            self.entries.retain(|path, _| {
+                if live.contains(path) {
+                    return true;
+                }
+                let lower = path.replace('/', "\\").to_ascii_lowercase();
+                !lower.starts_with(&norm_prefix)
+            });
+        }
         let dirty = self.entries.len() != before;
         for clip in clips.iter_mut() {
             if let Some(e) = self.entries.get(&clip.path) {
@@ -198,7 +218,7 @@ mod tests {
     /// `clip_meta.json`). Unique per test so parallel runs never collide.
     fn store(tag: &str) -> ClipMetaStore {
         let dir = std::env::temp_dir().join(format!(
-            "clipflow-meta-{}-{tag}",
+            "kage-meta-{}-{tag}",
             std::process::id()
         ));
         let _ = std::fs::create_dir_all(&dir);

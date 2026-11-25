@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** Horizontal/vertical gap between cards — mirrors `gap-4` (16px) / `gap-3` (12px). */
+/** Horizontal/vertical gap between cards (mirrors `gap-4` 16px / `gap-3` 12px). */
 export function gapFor(compact: boolean): number {
   return compact ? 12 : 16;
 }
 
-/** Column count for a gallery width — mirrors the Tailwind `sm:`/`xl:` breakpoints. */
+/** Column count for a gallery width (mirrors Tailwind `sm:` / `xl:` breakpoints). */
 export function colsForWidth(width: number, compact: boolean): number {
   if (width < 640) return 1;
   if (width < 1280) return 2;
@@ -50,8 +50,8 @@ export function computeVisibleRows(opts: {
 const DEFAULT_OVERSCAN = 3;
 
 /**
- * Footer estimate (px) until the first row is measured — thumbnail is
- * aspect-video. Deliberately overshot: a couple of px of invisible gap is fine,
+ * Footer estimate (px) until the first row is measured (thumbnail is
+ * aspect-video). Deliberately overshot: a couple of px of invisible gap is fine,
  * an undershot pitch would overlap rows while the estimate is in use, and the
  * measurement correction then shrinks the scrollbar slightly instead of
  * growing it by thousands of px in a big library.

@@ -90,7 +90,10 @@ fn scan_into(
     seen: &mut std::collections::HashSet<String>,
     dirty: &mut bool,
 ) -> RResult<()> {
-    for entry in std::fs::read_dir(dir)? {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries {
         let Ok(entry) = entry else { continue };
         let path = entry.path();
         let Ok(file_type) = entry.file_type() else {
@@ -98,7 +101,7 @@ fn scan_into(
         };
         if file_type.is_dir() {
             if depth < 2 {
-                scan_into(
+                let _ = scan_into(
                     root,
                     &path,
                     depth + 1,
@@ -107,7 +110,7 @@ fn scan_into(
                     cache,
                     seen,
                     dirty,
-                )?;
+                );
             }
             continue;
         }
@@ -262,7 +265,7 @@ impl ProbeCache {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let tmp = path.with_extension("json.tmp");
+        let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
         if std::fs::write(&tmp, &json).is_ok() {
             let _ = std::fs::rename(&tmp, path);
         }
@@ -304,7 +307,7 @@ fn prune_thumb_cache(clips: &[ClipMetadata]) {
         for entry in entries.flatten() {
             let name = entry.file_name();
             if let Some(s) = name.to_str() {
-                if s.ends_with(".jpg") && !keep.contains(s) {
+                if (s.ends_with(".jpg") && !keep.contains(s)) || s.ends_with(".tmp") {
                     let _ = std::fs::remove_file(entry.path());
                 }
             }
@@ -347,9 +350,7 @@ pub fn suggested_trim_path(source: &Path) -> PathBuf {
     candidate
 }
 
-// ===========================================================================
-//                        WINDOWS IMPLEMENTATION
-// ===========================================================================
+// Windows Media Foundation implementation
 
 #[cfg(all(windows, not(feature = "headless-sim")))]
 mod imp {
@@ -520,14 +521,29 @@ mod imp {
             let mut ptr: *mut u8 = std::ptr::null_mut();
             let mut len = 0u32;
             buffer.Lock(&mut ptr, None, Some(&mut len)).map_err(err)?;
+            if ptr.is_null() || len == 0 {
+                let _ = buffer.Unlock();
+                return Err(RecorderError::Other("thumbnail: empty frame buffer".into()));
+            }
             let src = std::slice::from_raw_parts(ptr, len as usize);
+
+            let default_stride = current
+                .GetUINT32(&MF_MT_DEFAULT_STRIDE)
+                .map(|u| u as i32)
+                .unwrap_or((w * 4) as i32);
+            let stride = default_stride.unsigned_abs().max(w * 4) as usize;
+            let bottom_up = default_stride < 0;
 
             let target_w = if max_width == 0 { w } else { max_width.min(w) };
             let target_h = ((target_w as f32) * h as f32 / w as f32).round().max(1.0) as u32;
             let mut rgb_buf = vec![0u8; (target_w * target_h * 3) as usize];
-            let stride = (w * 4) as usize;
             for y in 0..target_h {
-                let sy = (y as u64 * h as u64 / target_h as u64) as usize;
+                let raw_sy = (y as u64 * h as u64 / target_h as u64) as usize;
+                let sy = if bottom_up {
+                    (h as usize).saturating_sub(1 + raw_sy)
+                } else {
+                    raw_sy
+                };
                 for x in 0..target_w {
                     let sx = (x as u64 * w as u64 / target_w as u64) as usize;
                     let si = sy * stride + sx * 4;
@@ -673,6 +689,8 @@ mod imp {
             let mut base: Option<i64> = None;
             let mut snapped = start;
             let mut last_end = start_hns;
+            let mut video_done = false;
+            let mut audio_done = a_out.is_none();
 
             loop {
                 let mut stream_index = 0u32;
@@ -694,24 +712,46 @@ mod imp {
                     break;
                 }
                 let Some(sample) = sample else { continue };
-                if ts > end_hns {
-                    break;
+
+                if stream_index == video_stream_idx {
+                    if ts > end_hns {
+                        video_done = true;
+                        if audio_done {
+                            break;
+                        }
+                        continue;
+                    }
+                    if base.is_none() {
+                        let is_clean = sample.GetUINT32(&MFSampleExtension_CleanPoint).unwrap_or(1) == 1;
+                        if !is_clean && ts < start_hns + HNS_PER_SECOND {
+                            continue;
+                        }
+                        base = Some(ts);
+                        snapped = ts as f32 / HNS_PER_SECOND as f32;
+                    }
+                } else if Some(stream_index) == audio_stream_idx {
+                    if ts > end_hns {
+                        audio_done = true;
+                        if video_done {
+                            break;
+                        }
+                        continue;
+                    }
+                    if base.is_none() {
+                        continue;
+                    }
+                } else {
+                    continue;
                 }
 
-                if base.is_none() {
-                    base = Some(ts);
-                    snapped = ts as f32 / HNS_PER_SECOND as f32;
-                }
                 let rebased = (ts - base.unwrap()).max(0);
                 sample.SetSampleTime(rebased).map_err(err)?;
-                last_end = ts + sample.GetSampleDuration().unwrap_or(0);
+                last_end = last_end.max(ts + sample.GetSampleDuration().unwrap_or(0));
 
                 let target = if stream_index == video_stream_idx {
                     Some(v_out)
-                } else if Some(stream_index) == audio_stream_idx {
-                    a_out
                 } else {
-                    None
+                    a_out
                 };
                 if let Some(t) = target {
                     writer.WriteSample(t, &sample).map_err(err)?;
@@ -782,26 +822,33 @@ pub fn extract_thumbnail(path: &Path, at_seconds: f32) -> RResult<String> {
 
 fn extract_thumbnail_in(path: &Path, at_seconds: f32, cache_dir: &Path) -> RResult<String> {
     use base64::Engine;
-    if let Ok(meta) = std::fs::metadata(path) {
-        let mod_ms = modified_ms(&meta);
-        if mod_ms != 0 {
-            let cached = thumb_cache_file(cache_dir, path, meta.len(), mod_ms);
-            if let Ok(bytes) = std::fs::read(&cached) {
+    let default_seek = (at_seconds - 1.0).abs() < 0.05;
+    if default_seek {
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mod_ms = modified_ms(&meta);
+            if mod_ms != 0 {
+                let cached = thumb_cache_file(cache_dir, path, meta.len(), mod_ms);
+                if let Ok(bytes) = std::fs::read(&cached) {
+                    return Ok(format!(
+                        "data:image/jpeg;base64,{}",
+                        base64::engine::general_purpose::STANDARD.encode(&bytes)
+                    ));
+                }
+                let jpg = imp::extract_frame_jpeg_bytes(path, at_seconds, 360)?;
+                let _ = std::fs::create_dir_all(cache_dir);
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                let tmp = cached.with_extension(format!("jpg.{}.{stamp}.tmp", std::process::id()));
+                if std::fs::write(&tmp, &jpg).is_ok() {
+                    let _ = std::fs::rename(&tmp, &cached);
+                }
                 return Ok(format!(
                     "data:image/jpeg;base64,{}",
-                    base64::engine::general_purpose::STANDARD.encode(&bytes)
+                    base64::engine::general_purpose::STANDARD.encode(&jpg)
                 ));
             }
-            let jpg = imp::extract_frame_jpeg_bytes(path, at_seconds, 360)?;
-            let _ = std::fs::create_dir_all(cache_dir);
-            let tmp = cached.with_extension("jpg.tmp");
-            if std::fs::write(&tmp, &jpg).is_ok() {
-                let _ = std::fs::rename(&tmp, &cached);
-            }
-            return Ok(format!(
-                "data:image/jpeg;base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(&jpg)
-            ));
         }
     }
     let jpg = imp::extract_frame_jpeg_bytes(path, at_seconds, 360)?;
@@ -821,7 +868,7 @@ pub fn trim_stream_copy(
     start: f32,
     end: f32,
 ) -> RResult<TrimResult> {
-    if end <= start {
+    if !start.is_finite() || !end.is_finite() || end <= start {
         return Err(RecorderError::Other(
             "trim end must be greater than trim start".into(),
         ));

@@ -6,6 +6,10 @@ on:
       - "v*"
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -22,6 +26,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tagVer = "${{ github.ref_name }}".TrimStart('v')
+          $pkgVer = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVer = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($tagVer -ne $pkgVer -or $tagVer -ne $tauriVer) {
+            throw "Version mismatch: tag=$tagVer package=$pkgVer tauri=$tauriVer"
+          }
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -43,16 +58,22 @@ jobs:
         run: npm ci
 
       - name: Typecheck and unit tests
-        run: npm run typecheck && npm test
+        run: |
+          npm run typecheck
+          npm test
 
       - name: Rust tests and clippy
+        shell: pwsh
         run: |
           npm run build
-          cargo test --manifest-path src-tauri/Cargo.toml --headless-sim || cargo test --manifest-path src-tauri/Cargo.toml --features headless-sim
+          cargo test --manifest-path src-tauri/Cargo.toml --features headless-sim
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build and publish release
+      - name: Build and publish draft release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,7 +81,7 @@ jobs:
           tagName: v__VERSION__
           releaseName: "KAGE Studio v__VERSION__"
           releaseBody: |
-            Windows installers (NSIS setup, MSI) and portable executable for KAGE Studio.
-          releaseDraft: false
+            Windows installers (NSIS setup, MSI) and executable for KAGE Studio.
+          releaseDraft: true
           prerelease: false
           uploadPlainBinary: true

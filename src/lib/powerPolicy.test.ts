@@ -101,7 +101,7 @@ describe("decideEco", () => {
 
 describe("EcoHysteresis", () => {
   let now = 0;
-  // `now` is shared across tests inside this describe — reset it so no test
+  // `now` is shared across tests inside this describe; reset it so no test
   // inherits the previous test's clock (moving it backwards would break the
   // stability arithmetic).
   beforeEach(() => {
@@ -124,7 +124,7 @@ describe("EcoHysteresis", () => {
     const g = h();
     expect(g.tick(true)).toBeNull();
     now = 4000;
-    expect(g.tick(false)).toBeNull(); // flapped back — clock restarts
+    expect(g.tick(false)).toBeNull(); // flapped back, clock restarts
     now = 11000;
     expect(g.tick(false)).toBe(false);
   });
@@ -138,7 +138,7 @@ describe("EcoHysteresis", () => {
     now = 12000;
     expect(g.tick(true)).toBeNull(); // stable, already applied
     now = 12000;
-    expect(g.tick(false)).toBeNull(); // just flipped — must wait
+    expect(g.tick(false)).toBeNull(); // just flipped, must wait
     now = 18000;
     expect(g.tick(false)).toBe(false);
   });
@@ -150,7 +150,7 @@ describe("EcoHysteresis", () => {
     expect(g.tick(true)).toBe(true);
     g.commit(true);
     now = 7000;
-    expect(g.tick(false)).toBeNull(); // just flipped — must wait
+    expect(g.tick(false)).toBeNull(); // just flipped, must wait
     now = 13000;
     expect(g.tick(false)).toBe(false);
   });

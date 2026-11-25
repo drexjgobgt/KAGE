@@ -167,7 +167,7 @@
       "name": "MiniUp",
       "x": 45,
       "y": 26,
-      "path": "M 0 38 L 38 0 L 55 0 L 12 43 Z",
+      "path": "M 0 38 L 38 0 L 55 0 L 13 42 Z",
       "closed": true,
       "parent": 10,
       "props": {
@@ -179,9 +179,9 @@
     "command": "vector.create",
     "params": {
       "name": "MiniDown",
-      "x": 47,
-      "y": 62,
-      "path": "M 11 0 L 53 40 L 35 40 L 0 6 Z",
+      "x": 45,
+      "y": 60,
+      "path": "M 13 0 L 55 42 L 38 42 L 0 4 Z",
       "closed": true,
       "parent": 10,
       "props": {
@@ -199,7 +199,7 @@
       "height": 16,
       "parent": 10,
       "props": {
-        "fill": "#E5484D"
+        "fill": "#C92A32"
       }
     }
   },
@@ -212,7 +212,7 @@
       "y": 66,
       "parent": 9,
       "props": {
-        "fontFamily": "Playfair Display",
+        "fontFamily": "Instrument Serif",
         "fontSize": 68,
         "fill": "#F3ECE4",
         "letterSpacing": 10

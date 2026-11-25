@@ -1,8 +1,7 @@
 //! WASAPI loopback + microphone capture, mixed and AAC-encoded into the
 //! rolling ring buffer and/or direct MP4 recording stream.
 //!
-//! Drift tracking
-//! --------------
+//! Drift tracking:
 //! WASAPI hands every packet a QPC timestamp taken by the audio engine itself.
 //! We convert that stamp with the same [`QpcClock`] epoch used for video, and
 //! report smoothed clock-vs-PTS drift into `SharedState::audio_drift_tenths_ms`.
@@ -109,9 +108,7 @@ impl AudioCapture {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Windows implementation
-// ---------------------------------------------------------------------------
+// Windows WASAPI and AAC MFT implementation
 
 #[cfg(all(windows, not(feature = "headless-sim")))]
 mod imp {
@@ -243,6 +240,8 @@ mod imp {
         pub(super) float: bool,
         pub(super) bits: u32,
         pub(super) resample_phase: f64,
+        pub(super) prev_frame: [f32; 2],
+        pub(super) has_prev: bool,
         pub(super) temp_stereo: Vec<f32>,
         pub(super) temp_i16: Vec<f32>,
     }
@@ -300,9 +299,13 @@ mod imp {
         let bits = wf.wBitsPerSample as u32;
 
         let float = if wf.wFormatTag == 0xFFFE {
-            let ext = mix as *const WAVEFORMATEXTENSIBLE;
-            let subformat = std::ptr::addr_of!((*ext).SubFormat).read_unaligned();
-            subformat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+            if (wf.cbSize as usize) < 22 {
+                false
+            } else {
+                let ext = mix as *const WAVEFORMATEXTENSIBLE;
+                let subformat = std::ptr::addr_of!((*ext).SubFormat).read_unaligned();
+                subformat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+            }
         } else {
             wf.wFormatTag == 3
         };
@@ -317,6 +320,8 @@ mod imp {
             float,
             bits,
             resample_phase: 0.0,
+            prev_frame: [0.0, 0.0],
+            has_prev: false,
             temp_stereo: Vec::new(),
             temp_i16: Vec::new(),
         })
@@ -327,32 +332,61 @@ mod imp {
         in_rate: u32,
         out_rate: u32,
         phase: &mut f64,
+        prev_frame: &mut [f32; 2],
+        has_prev: &mut bool,
         out: &mut Vec<f32>,
     ) {
         if in_rate == out_rate || src.is_empty() {
+            if let Some(last) = src.chunks_exact(2).last() {
+                *prev_frame = [last[0], last[1]];
+                *has_prev = true;
+            }
             out.extend_from_slice(src);
             return;
         }
         let in_frames = src.len() / 2;
-        if in_frames <= 1 {
+        if in_frames == 0 {
             return;
         }
         let ratio = in_rate as f64 / out_rate as f64;
         let mut p = *phase;
-        while p < (in_frames - 1) as f64 {
-            let idx = p as usize;
-            let frac = (p - idx as f64) as f32;
-            let i0 = idx * 2;
-            let i1 = (idx + 1) * 2;
-            let l0 = src[i0];
-            let r0 = src[i0 + 1];
-            let l1 = src[i1];
-            let r1 = src[i1 + 1];
-            out.push(l0 + (l1 - l0) * frac);
-            out.push(r0 + (r1 - r0) * frac);
-            p += ratio;
+        if *has_prev {
+            while p < in_frames as f64 {
+                let idx = p.floor() as usize;
+                let frac = (p - idx as f64) as f32;
+                let (l0, r0) = if idx == 0 {
+                    (prev_frame[0], prev_frame[1])
+                } else {
+                    let k = (idx - 1) * 2;
+                    (src[k], src[k + 1])
+                };
+                let (l1, r1) = if idx < in_frames {
+                    let k = idx * 2;
+                    (src[k], src[k + 1])
+                } else {
+                    let k = (in_frames - 1) * 2;
+                    (src[k], src[k + 1])
+                };
+                out.push(l0 + (l1 - l0) * frac);
+                out.push(r0 + (r1 - r0) * frac);
+                p += ratio;
+            }
+            *phase = (p - in_frames as f64).max(0.0);
+        } else if in_frames >= 2 {
+            while p < (in_frames - 1) as f64 {
+                let idx = p.floor() as usize;
+                let frac = (p - idx as f64) as f32;
+                let i0 = idx * 2;
+                let i1 = (idx + 1) * 2;
+                out.push(src[i0] + (src[i1] - src[i0]) * frac);
+                out.push(src[i0 + 1] + (src[i1 + 1] - src[i0 + 1]) * frac);
+                p += ratio;
+            }
+            *phase = (p - (in_frames - 1) as f64).max(0.0);
         }
-        *phase = (p - in_frames as f64).max(0.0);
+        let last = (in_frames - 1) * 2;
+        *prev_frame = [src[last], src[last + 1]];
+        *has_prev = true;
     }
 
     unsafe fn drain_endpoint(
@@ -396,40 +430,63 @@ mod imp {
             let n = frames as usize * ep.channels as usize;
             let frames_channels = frames as usize * CHANNELS as usize;
 
+            if n == 0 || ep.channels == 0 {
+                let _ = ep.capture.ReleaseBuffer(frames);
+                continue;
+            }
+
+            let decode_samples = |dst: &mut Vec<f32>| {
+                dst.clear();
+                if ep.float && ep.bits == 32 {
+                    let src = data as *const f32;
+                    for i in 0..n {
+                        dst.push(std::ptr::read_unaligned(src.add(i)));
+                    }
+                } else if !ep.float && ep.bits == 16 {
+                    let src = data as *const i16;
+                    for i in 0..n {
+                        dst.push(std::ptr::read_unaligned(src.add(i)) as f32 / 32768.0);
+                    }
+                } else if !ep.float && ep.bits == 24 {
+                    for i in 0..n {
+                        let off = i * 3;
+                        let b0 = *data.add(off) as i32;
+                        let b1 = (*data.add(off + 1) as i32) << 8;
+                        let b2 = ((*data.add(off + 2) as i8) as i32) << 16;
+                        dst.push((b0 | b1 | b2) as f32 / 8_388_608.0);
+                    }
+                } else if !ep.float && ep.bits == 32 {
+                    let src = data as *const i32;
+                    for i in 0..n {
+                        dst.push(std::ptr::read_unaligned(src.add(i)) as f32 / 2_147_483_648.0);
+                    }
+                } else {
+                    dst.resize(n, 0.0);
+                }
+            };
+
             if ep.rate == SAMPLE_RATE {
                 if silent || data.is_null() {
                     out.resize(out.len() + frames_channels, 0.0);
-                } else if ep.float {
-                    let src = std::slice::from_raw_parts(data as *const f32, n);
-                    downmix(src, ep.channels, out);
-                } else if ep.bits == 16 {
-                    let src = std::slice::from_raw_parts(data as *const i16, n);
-                    ep.temp_i16.clear();
-                    ep.temp_i16.extend(src.iter().map(|s| *s as f32 / 32768.0));
-                    downmix(&ep.temp_i16, ep.channels, out);
                 } else {
-                    out.resize(out.len() + frames_channels, 0.0);
+                    decode_samples(&mut ep.temp_i16);
+                    downmix(&ep.temp_i16, ep.channels, out);
                 }
             } else {
                 ep.temp_stereo.clear();
                 if silent || data.is_null() {
                     ep.temp_stereo.resize(frames_channels, 0.0);
-                } else if ep.float {
-                    let src = std::slice::from_raw_parts(data as *const f32, n);
-                    downmix(src, ep.channels, &mut ep.temp_stereo);
-                } else if ep.bits == 16 {
-                    let src = std::slice::from_raw_parts(data as *const i16, n);
-                    ep.temp_i16.clear();
-                    ep.temp_i16.extend(src.iter().map(|s| *s as f32 / 32768.0));
-                    downmix(&ep.temp_i16, ep.channels, &mut ep.temp_stereo);
                 } else {
-                    ep.temp_stereo.resize(frames_channels, 0.0);
+                    decode_samples(&mut ep.temp_i16);
+                    downmix(&ep.temp_i16, ep.channels, &mut ep.temp_stereo);
                 }
                 resample_stereo(
                     &ep.temp_stereo,
                     ep.rate,
                     SAMPLE_RATE,
                     &mut ep.resample_phase,
+                    &mut ep.prev_frame,
+                    &mut ep.has_prev,
                     out,
                 );
             }
@@ -439,6 +496,7 @@ mod imp {
 
     fn downmix(src: &[f32], channels: u32, out: &mut Vec<f32>) {
         match channels {
+            0 => {}
             1 => {
                 for s in src {
                     out.push(*s);
@@ -465,6 +523,9 @@ mod imp {
     /// on *every* exit path of `ProcessOutput` (including `NEED_MORE_INPUT`).
     struct AacEncoder {
         transform: IMFTransform,
+        in_buf: IMFMediaBuffer,
+        in_sample: IMFSample,
+        in_cap: u32,
         out_buf: IMFMediaBuffer,
         out_sample: IMFSample,
         out_cap: u32,
@@ -505,6 +566,11 @@ mod imp {
             transform.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0)?;
             transform.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0)?;
 
+            let in_cap = 1024 * CHANNELS * 2;
+            let in_buf = MFCreateMemoryBuffer(in_cap)?;
+            let in_sample = MFCreateSample()?;
+            in_sample.AddBuffer(&in_buf)?;
+
             let out_cap = transform
                 .GetOutputStreamInfo(0)
                 .map(|i| i.cbSize.max(4096))
@@ -515,6 +581,9 @@ mod imp {
 
             Ok(Self {
                 transform,
+                in_buf,
+                in_sample,
+                in_cap,
                 out_buf,
                 out_sample,
                 out_cap,
@@ -527,21 +596,24 @@ mod imp {
             pts_hns: i64,
             mut sink: impl FnMut(&[u8], i64, i64),
         ) -> windows::core::Result<()> {
-            let bytes = pcm.len() * 2;
-            let buffer = MFCreateMemoryBuffer(bytes as u32)?;
+            let bytes = (pcm.len() * 2) as u32;
+            if bytes > self.in_cap {
+                self.in_buf = MFCreateMemoryBuffer(bytes)?;
+                self.in_sample = MFCreateSample()?;
+                self.in_sample.AddBuffer(&self.in_buf)?;
+                self.in_cap = bytes;
+            }
             let mut ptr: *mut u8 = std::ptr::null_mut();
-            buffer.Lock(&mut ptr, None, None)?;
-            std::ptr::copy_nonoverlapping(pcm.as_ptr() as *const u8, ptr, bytes);
-            buffer.Unlock()?;
-            buffer.SetCurrentLength(bytes as u32)?;
+            self.in_buf.Lock(&mut ptr, None, None)?;
+            std::ptr::copy_nonoverlapping(pcm.as_ptr() as *const u8, ptr, bytes as usize);
+            self.in_buf.Unlock()?;
+            self.in_buf.SetCurrentLength(bytes)?;
 
             let duration =
                 (pcm.len() as i64 / CHANNELS as i64) * HNS_PER_SECOND / SAMPLE_RATE as i64;
-            let sample = MFCreateSample()?;
-            sample.AddBuffer(&buffer)?;
-            sample.SetSampleTime(pts_hns)?;
-            sample.SetSampleDuration(duration)?;
-            self.transform.ProcessInput(0, &sample, 0)?;
+            self.in_sample.SetSampleTime(pts_hns)?;
+            self.in_sample.SetSampleDuration(duration)?;
+            self.transform.ProcessInput(0, &self.in_sample, 0)?;
 
             loop {
                 let mut status = 0u32;
@@ -563,10 +635,7 @@ mod imp {
                 }];
 
                 let result = self.transform.ProcessOutput(0, &mut out, &mut status);
-                // windows-rs never drops `ManuallyDrop` fields on its own, so
-                // return the references lent to the MFT on *every* path
-                // (including `MF_E_TRANSFORM_NEED_MORE_INPUT`). Not doing this
-                // leaked ~0.5 to 0.8 GB/hr while the buffer was armed.
+                // Return COM refs lent to MFT on every exit path, including NEED_MORE_INPUT.
                 drop(std::mem::ManuallyDrop::take(&mut out[0].pSample));
                 drop(std::mem::ManuallyDrop::take(&mut out[0].pEvents));
                 match result {
@@ -581,8 +650,8 @@ mod imp {
                 let mut p: *mut u8 = std::ptr::null_mut();
                 let mut cur = 0u32;
                 contiguous.Lock(&mut p, None, Some(&mut cur))?;
-                let payload = std::slice::from_raw_parts(p, cur as usize);
-                if !payload.is_empty() {
+                if cur > 0 && !p.is_null() {
+                    let payload = std::slice::from_raw_parts(p, cur as usize);
                     sink(payload, t, d);
                 }
                 let _ = contiguous.Unlock();
@@ -663,7 +732,7 @@ mod imp {
             let mut loopback: Option<Endpoint> = None;
             let mut microphone: Option<Endpoint> = None;
             let mut encoder: Option<AacEncoder> = None;
-            let mut last_attempt = std::time::Instant::now();
+            let mut last_attempt = std::time::Instant::now() - std::time::Duration::from_secs(2);
             let mut current_mic_id = mic_device.read().clone();
 
             const FRAME_SAMPLES: usize = 1024 * CHANNELS as usize;
@@ -705,13 +774,18 @@ mod imp {
                         match AacEncoder::new() {
                             Ok(e) => {
                                 encoder = Some(e);
-                                *status.lock() = None;
                             }
                             Err(e) => {
                                 *status.lock() = Some(format!("AAC encoder unavailable: {e}"));
                                 log::warn!("[kage::audio] AAC MFT: {e}");
                             }
                         }
+                    }
+                    if encoder.is_some()
+                        && (!system || loopback.is_some())
+                        && (!mic || microphone.is_some())
+                    {
+                        *status.lock() = None;
                     }
                 }
 
@@ -748,10 +822,14 @@ mod imp {
                 }
 
                 if system && mic {
+                    let both_active =
+                        loopback.is_some() && gg > 0.0 && microphone.is_some() && mg > 0.0;
+                    let mix_gain = if both_active { 0.707 } else { 1.0 };
+
                     let common = sys_pending.len().min(mic_pending.len());
                     for i in 0..common {
                         mixed_pending
-                            .push((sys_pending[i] * 0.707 + mic_pending[i] * 0.707).clamp(-1.0, 1.0));
+                            .push(((sys_pending[i] + mic_pending[i]) * mix_gain).clamp(-1.0, 1.0));
                     }
                     sys_pending.drain(..common);
                     mic_pending.drain(..common);
@@ -759,13 +837,13 @@ mod imp {
                     if sys_pending.is_empty() && mic_pending.len() >= FRAME_SAMPLES {
                         let take = (mic_pending.len() / FRAME_SAMPLES) * FRAME_SAMPLES;
                         for s in mic_pending.drain(..take) {
-                            mixed_pending.push((s * 0.707).clamp(-1.0, 1.0));
+                            mixed_pending.push((s * mix_gain).clamp(-1.0, 1.0));
                         }
                     }
                     if mic_pending.is_empty() && sys_pending.len() >= FRAME_SAMPLES {
                         let take = (sys_pending.len() / FRAME_SAMPLES) * FRAME_SAMPLES;
                         for s in sys_pending.drain(..take) {
-                            mixed_pending.push((s * 0.707).clamp(-1.0, 1.0));
+                            mixed_pending.push((s * mix_gain).clamp(-1.0, 1.0));
                         }
                     }
                 } else if system {
@@ -775,15 +853,18 @@ mod imp {
                 }
 
                 let now_hns = clock.now_hns();
-                if now_hns > next_pts + frame_duration_hns && mixed_pending.len() < FRAME_SAMPLES {
-                    if now_hns - next_pts > HNS_PER_SECOND * 2 {
+                let mut virtual_pts = next_pts
+                    + ((mixed_pending.len() / FRAME_SAMPLES) as i64) * frame_duration_hns;
+                if now_hns > virtual_pts + frame_duration_hns {
+                    if now_hns - virtual_pts > HNS_PER_SECOND * 2 {
                         next_pts = now_hns;
                         mixed_pending.clear();
                     } else {
-                        while now_hns > next_pts + frame_duration_hns
+                        while now_hns > virtual_pts + frame_duration_hns
                             && mixed_pending.len() < FRAME_SAMPLES * 4
                         {
                             mixed_pending.resize(mixed_pending.len() + FRAME_SAMPLES, 0.0);
+                            virtual_pts += frame_duration_hns;
                         }
                     }
                 }
@@ -833,7 +914,7 @@ mod imp {
 
                     let gen = generation.load(Ordering::Acquire);
                     let ring_ref = &ring;
-                    let _ = enc.encode(&pcm, pts, |payload, t, d| {
+                    if let Err(e) = enc.encode(&pcm, pts, |payload, t, d| {
                         let pkt = EncodedPacket {
                             track: TrackKind::Audio,
                             data: Arc::from(payload),
@@ -853,7 +934,9 @@ mod imp {
                         if use_ring {
                             ring_ref.lock().push(pkt);
                         }
-                    });
+                    }) {
+                        log::warn!("[kage::audio] AAC encode error: {e}");
+                    }
                 }
 
                 std::thread::sleep(std::time::Duration::from_millis(poll_ms));
@@ -870,9 +953,7 @@ mod imp {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Non-Windows / simulation stub
-// ---------------------------------------------------------------------------
 
 #[cfg(any(not(windows), feature = "headless-sim"))]
 mod imp {

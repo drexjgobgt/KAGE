@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { kage } from "../lib/bridge";
+import { assetUrl, kage } from "../lib/bridge";
 import { formatBytes, formatDuration } from "../lib/format";
+import { deleteCachedThumbnail } from "../lib/thumbCache";
 import type { ClipMetadata } from "../lib/types";
 import {
   IconCamera,
   IconClose,
   IconCopy,
   IconExternal,
+  IconFolder,
   IconPause,
   IconPlay,
   IconPlus,
   IconScissors,
-  IconSearch,
   IconStar,
   IconTrash,
 } from "./Icons";
@@ -28,6 +29,13 @@ interface Props {
   onToast: (kind: "ok" | "err" | "warn" | "info", title: string, detail?: string) => void;
 }
 
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function resolveVideoSrc(clip: ClipMetadata): string | undefined {
+  return clip.preview_url ?? (kage.isTauri() ? assetUrl(clip.path) : undefined);
+}
+
 export function ClipTrimmerModal({
   clip,
   flushMs,
@@ -39,7 +47,11 @@ export function ClipTrimmerModal({
   onUpdateTags,
   onToast,
 }: Props) {
+  const native = kage.isTauri();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+
   const [title, setTitle] = useState(clip.title);
   const [duration, setDuration] = useState(Math.max(0.5, clip.duration_seconds));
   const [playhead, setPlayhead] = useState(0);
@@ -47,7 +59,7 @@ export function ClipTrimmerModal({
   const [outTime, setOutTime] = useState(Math.max(0.5, clip.duration_seconds));
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [videoSrc, setVideoSrc] = useState<string | undefined>(clip.preview_url);
+  const [videoSrc, setVideoSrc] = useState<string | undefined>(() => resolveVideoSrc(clip));
   const [newTag, setNewTag] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -58,22 +70,62 @@ export function ClipTrimmerModal({
     setPlayhead(0);
     setInTime(0);
     setOutTime(d);
-    setVideoSrc(clip.preview_url);
+    setVideoSrc(resolveVideoSrc(clip));
     setConfirmDelete(false);
   }, [clip]);
 
   useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    if (dialog) {
+      const first = dialog.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      first?.focus();
+    }
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const nodes = Array.from(
+          dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ).filter((el) => el.offsetParent !== null);
+        if (nodes.length === 0) return;
+        const first = nodes[0];
+        const last = nodes[nodes.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first || !dialogRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (document.activeElement === last || !dialogRef.current.contains(document.activeElement)) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previousFocusRef.current?.focus();
+    };
   }, [onClose]);
 
   const trimSpan = useMemo(() => Math.max(0.5, outTime - inTime), [inTime, outTime]);
+
+  const releaseVideoLock = async () => {
+    const v = videoRef.current;
+    if (v) {
+      v.pause();
+      v.removeAttribute("src");
+      v.load();
+    }
+    setPlaying(false);
+    setVideoSrc(undefined);
+    await new Promise((r) => setTimeout(r, 120));
+  };
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -93,16 +145,21 @@ export function ClipTrimmerModal({
     if (!trimmed || trimmed === clip.title) return;
     setBusy(true);
     try {
+      await releaseVideoLock();
       const newPath = await kage.renameClip(clip.path, trimmed);
+      deleteCachedThumbnail(clip.path);
       const updated: ClipMetadata = {
         ...clip,
         path: newPath,
         file_name: newPath.split(/[/\\]/).pop() || clip.file_name,
         title: trimmed,
       };
+      setVideoSrc(resolveVideoSrc(updated));
       onRenamed(clip.path, updated);
       onToast("ok", "Clip renamed", updated.file_name);
     } catch (e) {
+      setTitle(clip.title);
+      setVideoSrc(resolveVideoSrc(clip));
       onToast("err", "Rename failed", String(e));
     } finally {
       setBusy(false);
@@ -116,13 +173,13 @@ export function ClipTrimmerModal({
     }
     setBusy(true);
     try {
-      // Release the Windows file handle held by <video> before overwrite replaces the MP4.
-      if (overwrite && videoRef.current) {
-        videoRef.current.pause();
-        setVideoSrc(undefined);
-        await new Promise((r) => setTimeout(r, 80));
+      if (overwrite) {
+        await releaseVideoLock();
       }
       const res = await kage.trimClip(clip.path, inTime, outTime, overwrite);
+      if (overwrite) {
+        deleteCachedThumbnail(clip.path);
+      }
       onToast(
         "ok",
         overwrite ? "Clip overwritten losslessly" : "Trimmed copy saved",
@@ -131,7 +188,7 @@ export function ClipTrimmerModal({
       onTrimSaved();
       onClose();
     } catch (e) {
-      setVideoSrc(clip.preview_url);
+      setVideoSrc(resolveVideoSrc(clip));
       onToast("err", "Trim failed", String(e));
     } finally {
       setBusy(false);
@@ -157,12 +214,22 @@ export function ClipTrimmerModal({
     }
   };
 
+  const handleDelete = async () => {
+    setBusy(true);
+    try {
+      await releaseVideoLock();
+      onDeleted(clip);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleSnapshot = async () => {
     setBusy(true);
     try {
-      const pngB64 = await kage.extractFramePng(clip.path, playhead, 1920);
+      const pngB64 = await kage.extractFramePng(clip.path, playhead, 0);
       if (!pngB64) {
-        onToast("info", "Frame snapshot unavailable", "Browser preview has no local video frame decoder.");
+        onToast("info", "Frame snapshot unavailable", "Preview stream has no local frame decoder.");
         return;
       }
       const savedPath = await kage.snapshotToOutput(pngB64, clip.title);
@@ -187,21 +254,25 @@ export function ClipTrimmerModal({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="kage-trimmer-title"
+      aria-labelledby="kage-trimmer-heading"
       className="fixed inset-0 z-50 flex items-center justify-center bg-[#0A0908]/80 backdrop-blur-md p-4 animate-pop"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
+      <h2 id="kage-trimmer-heading" className="sr-only">
+        Clip Trimmer: {clip.title}
+      </h2>
+
       <div className="bezel-outer w-full max-w-4xl max-h-[92vh] flex flex-col">
         <div className="bezel-inner flex flex-col overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between gap-3 border-b border-[#282320] px-5 py-3.5">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <input
-                id="kage-trimmer-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -212,7 +283,7 @@ export function ClipTrimmerModal({
                   }
                 }}
                 aria-label="Clip title"
-                className="min-w-0 flex-1 rounded-[8px] border border-transparent bg-transparent px-2 py-1 font-display text-2xl text-[#F3ECE4] hover:border-[#282320] focus:border-[#E6C29F] focus:bg-[#0A0908] focus:outline-none"
+                className="min-w-0 flex-1 rounded-[8px] border border-transparent bg-transparent px-2 py-1 font-display text-2xl text-[#F3ECE4] hover:border-[#6E655E] focus:border-[#E6C29F] focus:bg-[#0A0908] focus:outline-none"
               />
               {flushMs !== undefined && (
                 <span className="shrink-0 rounded-[6px] border border-[#4ADE80]/30 bg-[#101A14] px-2 py-0.5 font-mono text-[11px] tabular-nums text-[#4ADE80]">
@@ -225,11 +296,11 @@ export function ClipTrimmerModal({
               <button
                 type="button"
                 onClick={() => onToggleFavorite(clip)}
-                aria-label={clip.favorite ? "Remove from favourites" : "Add to favourites"}
+                aria-label={clip.favorite ? "Remove from favorites" : "Add to favorites"}
                 className={`grid h-8 w-8 place-items-center rounded-[8px] border transition-colors ${
                   clip.favorite
                     ? "border-[#E6C29F] bg-[#241D15] text-[#E6C29F]"
-                    : "border-[#282320] bg-[#1A1715] text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4]"
+                    : "border-[#6E655E] bg-[#1A1715] text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
                 }`}
               >
                 <IconStar filled={clip.favorite} />
@@ -238,7 +309,7 @@ export function ClipTrimmerModal({
                 type="button"
                 onClick={onClose}
                 aria-label="Close trimmer"
-                className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#282320] bg-[#1A1715] text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4]"
+                className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#6E655E] bg-[#1A1715] text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
               >
                 <IconClose />
               </button>
@@ -246,7 +317,7 @@ export function ClipTrimmerModal({
           </div>
 
           {/* Video viewport */}
-          <div className="relative bg-[#0A0908] aspect-video max-h-[240px] w-full flex items-center justify-center border-b border-[#282320]">
+          <div className="relative bg-[#0A0908] aspect-video max-h-[300px] w-full flex items-center justify-center border-b border-[#282320]">
             {videoSrc ? (
               <video
                 ref={videoRef}
@@ -278,7 +349,9 @@ export function ClipTrimmerModal({
                   {clip.width}x{clip.height} at {clip.fps}fps / {formatDuration(duration)} / {formatBytes(clip.size_bytes)}
                 </div>
                 <p className="max-w-sm text-xs text-[#B5AA9F]">
-                  Simulated preview clip. Use In and Out controls below to test lossless trimming and splitting.
+                  {native
+                    ? "Preparing video stream..."
+                    : "Browser preview clip ready. Use In and Out controls below to test lossless trimming and splitting."}
                 </p>
               </div>
             )}
@@ -294,7 +367,6 @@ export function ClipTrimmerModal({
                 </span>
               </div>
 
-              {/* Playhead scrubber */}
               <input
                 type="range"
                 min={0}
@@ -313,9 +385,8 @@ export function ClipTrimmerModal({
                 className="kage-range w-full"
               />
 
-              {/* In / Out controls */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <label className="flex items-center gap-2 rounded-[8px] border border-[#282320] bg-[#0D0B0A] px-3 py-2 text-xs">
+                <label className="flex items-center gap-2 rounded-[8px] border border-[#6E655E] bg-[#0D0B0A] px-3 py-2 text-xs">
                   <span className="w-12 font-mono text-[#94897E]">IN</span>
                   <input
                     type="range"
@@ -327,6 +398,7 @@ export function ClipTrimmerModal({
                       "--range-pct": `${outTime > 0.3 ? Math.min(100, (inTime / Math.max(0.1, outTime - 0.3)) * 100) : 0}%`,
                     } as CSSProperties}
                     onChange={(e) => setInTime(Number(e.target.value))}
+                    aria-label="Trim start point"
                     className="kage-range flex-1"
                   />
                   <span className="w-14 text-right font-mono tabular-nums text-[#F3ECE4]">
@@ -334,7 +406,7 @@ export function ClipTrimmerModal({
                   </span>
                 </label>
 
-                <label className="flex items-center gap-2 rounded-[8px] border border-[#282320] bg-[#0D0B0A] px-3 py-2 text-xs">
+                <label className="flex items-center gap-2 rounded-[8px] border border-[#6E655E] bg-[#0D0B0A] px-3 py-2 text-xs">
                   <span className="w-12 font-mono text-[#94897E]">OUT</span>
                   <input
                     type="range"
@@ -346,6 +418,7 @@ export function ClipTrimmerModal({
                       "--range-pct": `${duration - (inTime + 0.3) > 0 ? Math.min(100, ((outTime - Math.min(duration, inTime + 0.3)) / (duration - Math.min(duration, inTime + 0.3))) * 100) : 100}%`,
                     } as CSSProperties}
                     onChange={(e) => setOutTime(Number(e.target.value))}
+                    aria-label="Trim end point"
                     className="kage-range flex-1"
                   />
                   <span className="w-14 text-right font-mono tabular-nums text-[#F3ECE4]">
@@ -366,7 +439,8 @@ export function ClipTrimmerModal({
                   type="button"
                   onClick={() => onUpdateTags(clip, clip.tags.filter((x) => x !== t))}
                   title={`Remove #${t}`}
-                  className="inline-flex items-center gap-1 rounded-[6px] border border-[#282320] bg-[#1A1715] px-2 py-0.5 font-mono text-[11px] text-[#E6C29F] hover:border-[#C92A32] hover:text-[#FF6B6F]"
+                  aria-label={`Remove tag ${t}`}
+                  className="inline-flex items-center gap-1 rounded-[6px] border border-[#6E655E] bg-[#1A1715] px-2 py-0.5 font-mono text-[11px] text-[#E6C29F] hover:border-[#C92A32] hover:text-[#FF6B6F]"
                 >
                   <span>#{t}</span>
                   <span aria-hidden="true">x</span>
@@ -386,7 +460,7 @@ export function ClipTrimmerModal({
                   placeholder="Add tag..."
                   maxLength={24}
                   aria-label="New clip tag"
-                  className="w-28 rounded-[6px] border border-[#282320] bg-[#0A0908] px-2 py-1 text-xs text-[#F3ECE4] placeholder:text-[#94897E] focus:border-[#E6C29F] focus:outline-none"
+                  className="w-28 rounded-[6px] border border-[#6E655E] bg-[#0A0908] px-2 py-1 text-xs text-[#F3ECE4] placeholder:text-[#94897E] focus:border-[#E6C29F] focus:outline-none"
                 />
                 <button
                   type="submit"
@@ -434,8 +508,13 @@ export function ClipTrimmerModal({
 
                 <button
                   type="button"
-                  onClick={() => void kage.copyClip(clip.path).then(() => onToast("ok", "Copied to clipboard", clip.file_name))}
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#282320] bg-[#12100E] px-2.5 py-1.5 text-xs text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4]"
+                  onClick={() =>
+                    void kage
+                      .copyClip(clip.path)
+                      .then(() => onToast("ok", "Copied to clipboard", clip.file_name))
+                      .catch((e) => onToast("err", "Copy failed", String(e)))
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#6E655E] bg-[#12100E] px-2.5 py-1.5 text-xs text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
                 >
                   <IconCopy className="h-3.5 w-3.5" />
                   <span>Copy</span>
@@ -443,17 +522,25 @@ export function ClipTrimmerModal({
 
                 <button
                   type="button"
-                  onClick={() => void kage.revealClip(clip.path)}
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#282320] bg-[#12100E] px-2.5 py-1.5 text-xs text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4]"
+                  onClick={() =>
+                    void kage
+                      .revealClip(clip.path)
+                      .catch((e) => onToast("err", "Could not open folder", String(e)))
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#6E655E] bg-[#12100E] px-2.5 py-1.5 text-xs text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
                 >
-                  <IconSearch className="h-3.5 w-3.5" />
+                  <IconFolder className="h-3.5 w-3.5" />
                   <span>Explorer</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => void kage.openClip(clip.path)}
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#282320] bg-[#12100E] px-2.5 py-1.5 text-xs text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4]"
+                  onClick={() =>
+                    void kage
+                      .openClip(clip.path)
+                      .catch((e) => onToast("err", "Could not open external player", String(e)))
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#6E655E] bg-[#12100E] px-2.5 py-1.5 text-xs text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
                 >
                   <IconExternal className="h-3.5 w-3.5" />
                   <span>Player</span>
@@ -466,7 +553,7 @@ export function ClipTrimmerModal({
                     type="button"
                     disabled={busy}
                     onClick={() => setConfirmDelete(true)}
-                    className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#C92A32]/50 bg-[#1A1011] px-3 py-1.5 text-xs font-medium text-[#FF6B6F] hover:border-[#FF6B6F]"
+                    className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#C92A32]/60 bg-[#1A1011] px-3 py-1.5 text-xs font-medium text-[#FF6B6F] hover:border-[#FF6B6F]"
                   >
                     <IconTrash className="h-3.5 w-3.5" />
                     <span>Delete</span>
@@ -475,7 +562,7 @@ export function ClipTrimmerModal({
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => onDeleted(clip)}
+                    onClick={() => void handleDelete()}
                     className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#C92A32] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#D9363E]"
                   >
                     Confirm Delete

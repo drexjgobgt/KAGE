@@ -10,7 +10,9 @@ interface TitleBarProps {
 }
 
 export function TitleBar({ stats, minimizeToTray, onOpenFolder }: TitleBarProps) {
-  const armed = stats.state === "buffering" || stats.state === "flushing";
+  const armed =
+    (stats.state === "buffering" || stats.state === "flushing") &&
+    stats.ring_enabled;
   const recovering = stats.state === "recovering" || stats.state === "starting";
   const failed = stats.state === "error";
 
@@ -56,7 +58,7 @@ export function TitleBar({ stats, minimizeToTray, onOpenFolder }: TitleBarProps)
     >
       <div className="flex items-center gap-2.5">
         <span className="text-[11px] font-semibold tracking-[0.22em] text-[#B5AA9F] uppercase">
-          KAGE Deck
+          KAGE Studio
         </span>
         <span
           className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium tabular-nums ${borderClass} ${textClass}`}
@@ -64,7 +66,7 @@ export function TitleBar({ stats, minimizeToTray, onOpenFolder }: TitleBarProps)
           <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
           {pillLabel}
         </span>
-        {stats.encoder.hardware && (
+        {stats.encoder.hardware && stats.width > 0 && stats.height > 0 && (
           <span className="hidden sm:inline text-[11px] text-[#94897E] tabular-nums">
             {stats.width}x{stats.height} {stats.target_fps}fps
           </span>
@@ -77,7 +79,7 @@ export function TitleBar({ stats, minimizeToTray, onOpenFolder }: TitleBarProps)
           onClick={onOpenFolder}
           title="Open output folder"
           aria-label="Open output folder"
-          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#282320] bg-[#12100E] px-2.5 text-[11px] font-medium text-[#B5AA9F] hover:border-[#6E655E] hover:text-[#F3ECE4] transition-colors"
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#6E655E] bg-[#12100E] px-2.5 text-[11px] font-medium text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4] transition-colors"
         >
           <IconFolder className="h-3.5 w-3.5" />
           <span className="hidden md:inline">Clips Folder</span>

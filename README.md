@@ -19,13 +19,17 @@ It combines two capture workflows inside a single lightweight GPU pipeline:
 1. **Instant Replay (`Alt + C`)**: Keeps the last 15 to 300 seconds of GPU-encoded H.264/HEVC frames inside a bounded circular RAM buffer and flushes them instantaneously to MP4 without interrupting gameplay or stealing window focus.
 2. **Direct MP4 Recording (`Alt + R`)**: Streams long-form screen + audio recordings straight to disk with zero replay ring overhead when disarmed, or shares the live hardware encoder when Replay Buffer is already armed.
 
-| Studio Deck (Armed) | Direct MP4 Stream (`Alt + R`) |
+| Studio Deck (Armed) | Signal Flow Telemetry |
 | :---: | :---: |
-| ![KAGE Studio Armed](design/exports/screens/01-Studio-Armed.png) | ![KAGE Studio Recording](design/exports/screens/02-Studio-Recording.png) |
+| ![KAGE Studio Armed](docs/screenshots/studio-armed.png) | ![KAGE Signal Flow Telemetry](docs/screenshots/telemetry-pipeline.png) |
 
-| Lossless Clip Trimmer | Settings &amp; Global Hotkeys |
+| Lossless Clip Trimmer | Clip Library &amp; Batch Actions |
 | :---: | :---: |
-| ![KAGE Library Trimmer](design/exports/screens/03-Library-Trimmer.png) | ![KAGE Settings Hotkeys](design/exports/screens/04-Settings-Hotkeys.png) |
+| ![KAGE Clip Trimmer](docs/screenshots/clip-trimmer.png) | ![KAGE Clip Library](docs/screenshots/library-grid.png) |
+
+| Settings &amp; Pipeline Controls |
+| :---: |
+| ![KAGE Settings Pipeline](docs/screenshots/settings-pipeline.png) |
 
 ---
 

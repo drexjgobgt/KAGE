@@ -70,5 +70,7 @@ jobs:
       - name: Windows unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Clippy lint check
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Clippy lint check (Windows + headless-sim)
+        run: |
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path src-tauri/Cargo.toml --features headless-sim --all-targets -- -D warnings

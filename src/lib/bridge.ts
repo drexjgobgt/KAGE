@@ -285,11 +285,12 @@ export const kage = {
       return invoke<SplitResult>("split_clip", { sourcePath, atSeconds });
     }
     const sim = await getSim();
-    const a = sim.trim(sourcePath, 0, atSeconds);
+    const a = sim.trim(sourcePath, 0, atSeconds, "_partA");
     const b = sim.trim(
       sourcePath,
       atSeconds,
       sim.find(sourcePath)?.duration_seconds ?? atSeconds + 1,
+      "_partB",
     );
     return {
       partA: {
@@ -327,7 +328,7 @@ export const kage = {
     }
     const sim = await getSim();
     const t0 = performance.now();
-    const clip = sim.trim(sourcePath, startTime, endTime);
+    const clip = sim.trim(sourcePath, startTime, endTime, "_trim", overwrite);
     return {
       path: clip.path,
       file_name: clip.file_name,
@@ -507,10 +508,13 @@ export const kage = {
   async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
     if (isTauri()) return invoke<AppSettings>("update_settings", { patch });
     browserSettings = { ...browserSettings, ...patch };
-    if (patch.bufferSeconds) {
-      const sim = await getSim();
-      sim.setBufferSeconds(patch.bufferSeconds);
-    }
+    const sim = await getSim();
+    if (patch.bufferSeconds !== undefined) sim.setBufferSeconds(patch.bufferSeconds);
+    if (patch.targetFps !== undefined) sim.targetFps = patch.targetFps;
+    if (patch.bitrateKbps !== undefined) sim.bitrateKbps = patch.bitrateKbps;
+    if (patch.codec !== undefined) sim.codec = patch.codec;
+    if (patch.organizeByGame !== undefined) sim.organizeByGame = patch.organizeByGame;
+    if (patch.privacyPauseWhenUnfocused === false) sim.setPrivacyGate(false);
     return browserSettings;
   },
 
@@ -718,4 +722,3 @@ export const kage = {
 };
 
 export type KageApi = typeof kage;
-export const clipflow = kage;

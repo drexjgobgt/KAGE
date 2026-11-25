@@ -25,9 +25,7 @@ use std::time::{Duration, Instant};
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
 // Public data model (mirrored by `src/lib/types.ts`)
-// ---------------------------------------------------------------------------
 
 /// 100-nanosecond units: the native Media Foundation time base.
 pub const HNS_PER_SECOND: i64 = 10_000_000;
@@ -191,6 +189,7 @@ pub struct EngineStats {
     pub audio_drift_ms: f32,
     pub audio_error: Option<String>,
     pub privacy_active: bool,
+    pub ring_enabled: bool,
     pub uptime_seconds: u64,
     pub last_error: Option<String>,
     pub recording_active: bool,
@@ -242,9 +241,7 @@ impl From<std::io::Error> for RecorderError {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Rolling ring buffer
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrackKind {
@@ -329,6 +326,13 @@ impl QpcClock {
 
     pub fn now_hns(&self) -> i64 {
         (self.start.elapsed().as_nanos() / 100) as i64
+    }
+}
+
+#[cfg(any(not(windows), feature = "headless-sim"))]
+impl Default for QpcClock {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -521,9 +525,7 @@ impl RollingRingBuffer {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Shared engine state
-// ---------------------------------------------------------------------------
 
 struct SharedState {
     running: AtomicBool,
@@ -641,21 +643,18 @@ pub fn free_disk_bytes(path: &Path) -> Option<u64> {
     platform::free_disk_bytes(path)
 }
 
-// ---------------------------------------------------------------------------
 // Direct streaming MP4 session (Alt + R)
-// ---------------------------------------------------------------------------
 
 struct DirectSession {
     path: PathBuf,
     file_name: String,
+    subfolder: Option<String>,
     header: VideoFormatHeader,
     started_for_direct_only: bool,
     writer_handle: std::thread::JoinHandle<RResult<(f32, u64, bool)>>,
 }
 
-// ---------------------------------------------------------------------------
 // CaptureEngine
-// ---------------------------------------------------------------------------
 
 pub struct CaptureEngine {
     shared: Arc<SharedState>,
@@ -668,6 +667,7 @@ pub struct CaptureEngine {
     mic_device: Arc<parking_lot::RwLock<Option<String>>>,
     video_format: Arc<Mutex<Option<VideoFormatHeader>>>,
     flush_lock: Mutex<()>,
+    lifecycle: Mutex<()>,
     direct_session: Mutex<Option<DirectSession>>,
 }
 
@@ -698,6 +698,7 @@ impl CaptureEngine {
             mic_device: Arc::new(parking_lot::RwLock::new(mic_dev)),
             video_format: Arc::new(Mutex::new(None)),
             flush_lock: Mutex::new(()),
+            lifecycle: Mutex::new(()),
             direct_session: Mutex::new(None),
         }
     }
@@ -786,6 +787,7 @@ impl CaptureEngine {
             audio_drift_ms: self.shared.audio_drift_tenths_ms.load(Ordering::Relaxed) as f32 / 10.0,
             audio_error: self.audio_error.lock().clone(),
             privacy_active: self.shared.privacy_gate.load(Ordering::Acquire),
+            ring_enabled: self.is_ring_enabled(),
             uptime_seconds: self
                 .shared
                 .started_at
@@ -801,6 +803,7 @@ impl CaptureEngine {
     }
 
     pub fn start(&self, cfg: RecorderConfig) -> RResult<EngineStats> {
+        let _lc = self.lifecycle.lock();
         if self.is_running() {
             // If engine is running strictly for direct recording (Alt+R) and user
             // arms the replay buffer, enable the ring live without restarting!
@@ -820,10 +823,14 @@ impl CaptureEngine {
             }
             return Err(RecorderError::AlreadyRunning);
         }
-        self.start_with_mode(cfg, true)
+        self.start_with_mode_locked(cfg, true)
     }
 
-    fn start_with_mode(&self, cfg: RecorderConfig, enable_ring: bool) -> RResult<EngineStats> {
+    fn start_with_mode_locked(
+        &self,
+        cfg: RecorderConfig,
+        enable_ring: bool,
+    ) -> RResult<EngineStats> {
         if self.is_running() {
             return Err(RecorderError::AlreadyRunning);
         }
@@ -898,13 +905,25 @@ impl CaptureEngine {
         let fmt = Arc::clone(&self.video_format);
         let thread_cfg = cfg.clone();
         let clock_c = Arc::clone(&clock);
-        let handle = std::thread::Builder::new()
+        let handle = match std::thread::Builder::new()
             .name("kage-capture".into())
             .spawn(move || {
                 set_thread_priority(thread_cfg.performance_mode);
                 capture_thread_main(shared, thread_cfg, fmt, clock_c);
-            })
-            .map_err(|e| RecorderError::Other(format!("failed to spawn capture thread: {e}")))?;
+            }) {
+            Ok(h) => h,
+            Err(e) => {
+                if let Some(a) = self.audio.lock().take() {
+                    a.stop();
+                }
+                self.shared.running.store(false, Ordering::Release);
+                self.shared.ring_enabled.store(false, Ordering::Release);
+                self.shared.set_state(EngineState::Idle);
+                return Err(RecorderError::Other(format!(
+                    "failed to spawn capture thread: {e}"
+                )));
+            }
+        };
         *self.worker.lock() = Some(handle);
 
         let deadline = Instant::now() + Duration::from_millis(2_000);
@@ -921,7 +940,7 @@ impl CaptureEngine {
                     .read()
                     .clone()
                     .unwrap_or_else(|| "unknown capture failure".into());
-                self.stop();
+                self.stop_locked();
                 return Err(RecorderError::Other(msg));
             }
             std::thread::sleep(Duration::from_millis(15));
@@ -934,6 +953,7 @@ impl CaptureEngine {
     /// clears the ring and switches to Direct-Only mode instead of aborting the
     /// active recording; when `stop_recording` finishes, the engine stops cleanly.
     pub fn disarm_buffer(&self) {
+        let _lc = self.lifecycle.lock();
         if self.is_recording() {
             self.shared.ring_enabled.store(false, Ordering::Release);
             self.shared.ring.lock().clear_and_shrink();
@@ -942,29 +962,20 @@ impl CaptureEngine {
             }
             return;
         }
-        self.stop();
+        self.stop_locked();
     }
 
     pub fn stop(&self) {
+        let _lc = self.lifecycle.lock();
+        self.stop_locked();
+    }
+
+    fn stop_locked(&self) {
         // Finalize any active Alt+R MP4 stream first so the file is never left corrupt.
         if self.is_recording() {
-            let _ = self.stop_recording();
+            let _ = self.stop_recording_locked();
         }
-        self.shared.stop_requested.store(true, Ordering::Release);
-        if let Some(a) = self.audio.lock().take() {
-            a.stop();
-        }
-        if let Some(h) = self.worker.lock().take() {
-            let _ = h.join();
-        }
-        self.shared.running.store(false, Ordering::Release);
-        self.shared.ring_enabled.store(false, Ordering::Release);
-        self.shared.set_state(EngineState::Idle);
-        self.shared.ring.lock().clear_and_shrink();
-        *self.shared.effective_target_fps.write() = 0;
-        *self.shared.effective_bitrate_kbps.write() = 0;
-        *self.shared.integrated_gpu.write() = false;
-        *self.shared.capture_fps.write() = 0.0;
+        self.stop_engine_only();
     }
 
     /// Starts direct-to-disk MP4 streaming (`Alt + R`).
@@ -976,18 +987,20 @@ impl CaptureEngine {
         cfg_when_idle: RecorderConfig,
         subfolder: Option<String>,
     ) -> RResult<String> {
+        let _lc = self.lifecycle.lock();
         if self.is_recording() {
             return Err(RecorderError::Other("Direct recording already active".into()));
         }
 
-        let base_dir = if self.is_running() {
-            self.config.read().output_dir.clone()
+        let cfg_eff = if self.is_running() {
+            self.config.read().clone()
         } else {
-            cfg_when_idle.output_dir.clone()
+            cfg_when_idle.clone()
         };
+        let include_audio = cfg_eff.capture_system_audio || cfg_eff.capture_microphone;
         let out_dir = match &subfolder {
-            Some(sub) => base_dir.join(sub),
-            None => base_dir,
+            Some(sub) => cfg_eff.output_dir.join(sub),
+            None => cfg_eff.output_dir.clone(),
         };
         std::fs::create_dir_all(&out_dir)?;
 
@@ -1002,7 +1015,7 @@ impl CaptureEngine {
         }
 
         let started_for_direct_only = if !self.is_running() {
-            self.start_with_mode(cfg_when_idle, false)?;
+            self.start_with_mode_locked(cfg_when_idle, false)?;
             true
         } else {
             false
@@ -1010,7 +1023,7 @@ impl CaptureEngine {
 
         let header = self.video_format.lock().clone().ok_or_else(|| {
             if started_for_direct_only {
-                self.stop();
+                self.stop_locked();
             }
             RecorderError::Other("encoder header not ready yet".into())
         })?;
@@ -1031,14 +1044,22 @@ impl CaptureEngine {
 
         let writer_path = path.clone();
         let writer_header = header.clone();
+        let writer_shared = Arc::clone(&self.shared);
         let writer_handle = std::thread::Builder::new()
             .name("kage-rec-writer".into())
             .spawn(move || {
-                platform::run_direct_writer(&writer_path, &writer_header, rx, rec_bytes)
+                platform::run_direct_writer(
+                    &writer_path,
+                    &writer_header,
+                    rx,
+                    rec_bytes,
+                    include_audio,
+                    writer_shared,
+                )
             })
             .map_err(|e| {
                 if started_for_direct_only {
-                    self.stop();
+                    self.stop_locked();
                 }
                 RecorderError::Other(format!("failed to spawn recording writer: {e}"))
             })?;
@@ -1056,6 +1077,7 @@ impl CaptureEngine {
         *self.direct_session.lock() = Some(DirectSession {
             path,
             file_name,
+            subfolder,
             header,
             started_for_direct_only,
             writer_handle,
@@ -1065,7 +1087,12 @@ impl CaptureEngine {
     }
 
     /// Stops active direct-to-disk MP4 recording (`Alt + R`) and finalizes the file.
-    pub fn stop_recording(&self) -> RResult<ClipWriteResult> {
+    pub fn stop_recording(&self) -> RResult<(ClipWriteResult, Option<String>)> {
+        let _lc = self.lifecycle.lock();
+        self.stop_recording_locked()
+    }
+
+    fn stop_recording_locked(&self) -> RResult<(ClipWriteResult, Option<String>)> {
         let sess = self
             .direct_session
             .lock()
@@ -1093,24 +1120,30 @@ impl CaptureEngine {
         let (duration_seconds, size_bytes, has_audio) = match join_res {
             Ok(v) => v,
             Err(e) => {
-                let _ = std::fs::remove_file(&sess.path);
+                let on_disk = std::fs::metadata(&sess.path).map(|m| m.len()).unwrap_or(0);
+                if on_disk == 0 {
+                    let _ = std::fs::remove_file(&sess.path);
+                }
                 return Err(e);
             }
         };
 
         self.shared.recording_bytes.store(0, Ordering::Release);
 
-        Ok(ClipWriteResult {
-            path: sess.path.to_string_lossy().to_string(),
-            file_name: sess.file_name,
-            duration_seconds,
-            size_bytes,
-            flush_ms: t0.elapsed().as_secs_f32() * 1000.0,
-            width: sess.header.width,
-            height: sess.header.height,
-            fps: sess.header.fps_num.max(1),
-            has_audio,
-        })
+        Ok((
+            ClipWriteResult {
+                path: sess.path.to_string_lossy().to_string(),
+                file_name: sess.file_name,
+                duration_seconds,
+                size_bytes,
+                flush_ms: t0.elapsed().as_secs_f32() * 1000.0,
+                width: sess.header.width,
+                height: sess.header.height,
+                fps: sess.header.fps_num.max(1),
+                has_audio,
+            },
+            sess.subfolder,
+        ))
     }
 
     fn stop_engine_only(&self) {
@@ -1293,9 +1326,7 @@ impl Drop for CaptureEngine {
     }
 }
 
-// ===========================================================================
-//                        WINDOWS IMPLEMENTATION
-// ===========================================================================
+// Windows capture & sink writer implementation
 
 #[cfg(all(windows, not(feature = "headless-sim")))]
 mod win {
@@ -1533,8 +1564,8 @@ mod win {
         enumerator: ID3D11VideoProcessorEnumerator,
         input_tex: ID3D11Texture2D,
         in_view: ID3D11VideoProcessorInputView,
-        pub nv12: ID3D11Texture2D,
-        out_view: ID3D11VideoProcessorOutputView,
+        slots: Vec<(ID3D11Texture2D, ID3D11VideoProcessorOutputView)>,
+        cur_slot: usize,
         src_w: u32,
         src_h: u32,
         _dst_w: u32,
@@ -1655,24 +1686,34 @@ mod win {
                     CPUAccessFlags: 0,
                     MiscFlags: 0,
                 };
-                let mut nv12: Option<ID3D11Texture2D> = None;
-                device
-                    .CreateTexture2D(&nv12_desc, None, Some(&mut nv12))
-                    .map_err(hr)?;
-                let nv12 = nv12.ok_or_else(|| RecorderError::Other("no nv12 texture".into()))?;
-
+                const NV12_POOL_SIZE: usize = 4;
+                let mut slots = Vec::with_capacity(NV12_POOL_SIZE);
                 let ovd = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
                     ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
                     Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 {
                         Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 },
                     },
                 };
-                let mut out_view: Option<ID3D11VideoProcessorOutputView> = None;
-                vdevice
-                    .CreateVideoProcessorOutputView(&nv12, &enumerator, &ovd, Some(&mut out_view))
-                    .map_err(hr)?;
-                let out_view =
-                    out_view.ok_or_else(|| RecorderError::Other("no vp output view".into()))?;
+                for _ in 0..NV12_POOL_SIZE {
+                    let mut nv12: Option<ID3D11Texture2D> = None;
+                    device
+                        .CreateTexture2D(&nv12_desc, None, Some(&mut nv12))
+                        .map_err(hr)?;
+                    let nv12 =
+                        nv12.ok_or_else(|| RecorderError::Other("no nv12 texture".into()))?;
+                    let mut out_view: Option<ID3D11VideoProcessorOutputView> = None;
+                    vdevice
+                        .CreateVideoProcessorOutputView(
+                            &nv12,
+                            &enumerator,
+                            &ovd,
+                            Some(&mut out_view),
+                        )
+                        .map_err(hr)?;
+                    let out_view = out_view
+                        .ok_or_else(|| RecorderError::Other("no vp output view".into()))?;
+                    slots.push((nv12, out_view));
+                }
 
                 Ok(Self {
                     vdevice,
@@ -1682,8 +1723,8 @@ mod win {
                     enumerator,
                     input_tex,
                     in_view,
-                    nv12,
-                    out_view,
+                    slots,
+                    cur_slot: 0,
                     src_w,
                     src_h,
                     _dst_w: dst_w,
@@ -1692,8 +1733,9 @@ mod win {
             }
         }
 
-        pub fn convert(&self, src: &ID3D11Texture2D) -> RResult<()> {
+        pub fn convert(&mut self, src: &ID3D11Texture2D) -> RResult<&ID3D11Texture2D> {
             unsafe {
+                self.cur_slot = (self.cur_slot + 1) % self.slots.len();
                 self.context.CopyResource(&self.input_tex, src);
 
                 let mut streams = [D3D11_VIDEO_PROCESSOR_STREAM {
@@ -1706,13 +1748,19 @@ mod win {
                     ..Default::default()
                 }];
 
+                let out_view = &self.slots[self.cur_slot].1;
                 let result = self
                     .vcontext
-                    .VideoProcessorBlt(&self.processor, &self.out_view, 0, &streams);
+                    .VideoProcessorBlt(&self.processor, out_view, 0, &streams);
 
                 drop(std::mem::ManuallyDrop::take(&mut streams[0].pInputSurface));
-                result.map_err(hr)
+                result.map_err(hr)?;
+                Ok(&self.slots[self.cur_slot].0)
             }
+        }
+
+        pub fn current_nv12(&self) -> &ID3D11Texture2D {
+            &self.slots[self.cur_slot].0
         }
     }
 
@@ -1720,6 +1768,7 @@ mod win {
         transform: IMFTransform,
         events: Option<IMFMediaEventGenerator>,
         _dxgi_manager: IMFDXGIDeviceManager,
+        out_sample_pair: Option<(IMFSample, IMFMediaBuffer, u32)>,
         pub info: EncoderInfo,
         pub header: VideoFormatHeader,
         async_mode: bool,
@@ -1769,7 +1818,7 @@ mod win {
                 .map_err(hr)?;
 
                 let desired_vendor = EncoderVendor::from_friendly_name(adapter_name);
-                let mut chosen: Option<(IMFActivate, String)> = None;
+                let mut chosen: Option<(IMFActivate, String, EncoderVendor)> = None;
                 if count > 0 && !activates.is_null() {
                     let slice = std::slice::from_raw_parts_mut(activates, count as usize);
                     for slot in slice.iter_mut() {
@@ -1789,12 +1838,14 @@ mod win {
                                 "Hardware Encoder".to_string()
                             };
                             let mft_vendor = EncoderVendor::from_friendly_name(&friendly);
-                            if chosen.is_none() || mft_vendor == desired_vendor {
-                                chosen = Some((act, friendly));
-                                if mft_vendor == desired_vendor {
-                                    // Drop remaining COM activates below before returning.
-                                    continue;
-                                }
+                            let chosen_is_desired = chosen
+                                .as_ref()
+                                .map(|(_, _, v)| *v == desired_vendor)
+                                .unwrap_or(false);
+                            if chosen.is_none()
+                                || (mft_vendor == desired_vendor && !chosen_is_desired)
+                            {
+                                chosen = Some((act, friendly, mft_vendor));
                             }
                             // Non-selected `act` drops right here instead of leaking!
                         }
@@ -1804,21 +1855,28 @@ mod win {
                     ));
                 }
 
-                let (transform, friendly, hardware) = match chosen {
-                    Some((act, name)) => {
-                        let t: IMFTransform = act.ActivateObject().map_err(hr)?;
-                        (t, name, true)
-                    }
-                    None => {
-                        let t: IMFTransform = windows::Win32::System::Com::CoCreateInstance(
-                            &CLSID_MSH264EncoderMFT,
-                            None,
-                            windows::Win32::System::Com::CLSCTX_INPROC_SERVER,
-                        )
-                        .map_err(|_| RecorderError::NoEncoder)?;
-                        (t, "Microsoft H.264 Encoder MFT".to_string(), false)
-                    }
-                };
+                let (transform, friendly, hardware, effective_codec, effective_subtype) =
+                    match chosen {
+                        Some((act, name, _)) => {
+                            let t: IMFTransform = act.ActivateObject().map_err(hr)?;
+                            (t, name, true, codec, subtype)
+                        }
+                        None => {
+                            let t: IMFTransform = windows::Win32::System::Com::CoCreateInstance(
+                                &CLSID_MSH264EncoderMFT,
+                                None,
+                                windows::Win32::System::Com::CLSCTX_INPROC_SERVER,
+                            )
+                            .map_err(|_| RecorderError::NoEncoder)?;
+                            (
+                                t,
+                                "Microsoft H.264 Encoder MFT".to_string(),
+                                false,
+                                Codec::H264,
+                                MFVideoFormat_H264,
+                            )
+                        }
+                    };
 
                 if performance_mode && !hardware {
                     log::warn!(
@@ -1843,18 +1901,23 @@ mod win {
                 let manager =
                     manager.ok_or_else(|| RecorderError::Other("no dxgi manager".into()))?;
                 manager.ResetDevice(device, reset_token).map_err(hr)?;
-                transform
-                    .ProcessMessage(
-                        MFT_MESSAGE_SET_D3D_MANAGER,
-                        manager.as_raw() as usize,
-                    )
-                    .map_err(hr)?;
+                let d3d_res = transform.ProcessMessage(
+                    MFT_MESSAGE_SET_D3D_MANAGER,
+                    manager.as_raw() as usize,
+                );
+                if hardware {
+                    d3d_res.map_err(hr)?;
+                } else {
+                    let _ = d3d_res;
+                }
 
                 let out_type = MFCreateMediaType().map_err(hr)?;
                 out_type
                     .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
                     .map_err(hr)?;
-                out_type.SetGUID(&MF_MT_SUBTYPE, &subtype).map_err(hr)?;
+                out_type
+                    .SetGUID(&MF_MT_SUBTYPE, &effective_subtype)
+                    .map_err(hr)?;
                 out_type
                     .SetUINT32(&MF_MT_AVG_BITRATE, bitrate_kbps * 1000)
                     .map_err(hr)?;
@@ -1867,7 +1930,7 @@ mod win {
                 set_attr_size(&out_type, &MF_MT_FRAME_SIZE, width, height)?;
                 set_attr_ratio(&out_type, &MF_MT_FRAME_RATE, fps, 1)?;
                 set_attr_ratio(&out_type, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
-                if codec == Codec::H264 {
+                if effective_codec == Codec::H264 {
                     out_type
                         .SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High.0 as u32)
                         .map_err(hr)?;
@@ -1933,6 +1996,22 @@ mod win {
                     }
                 }
 
+                let out_stream_info = transform
+                    .GetOutputStreamInfo(0)
+                    .map(|i| (i.dwFlags, i.cbSize))
+                    .unwrap_or((0, 0));
+                let provides_samples =
+                    (out_stream_info.0 & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32) != 0;
+                let out_sample_pair = if !provides_samples {
+                    let cap = out_stream_info.1.max((width * height).max(65536));
+                    let b = MFCreateMemoryBuffer(cap).map_err(hr)?;
+                    let s = MFCreateSample().map_err(hr)?;
+                    s.AddBuffer(&b).map_err(hr)?;
+                    Some((s, b, cap))
+                } else {
+                    None
+                };
+
                 let vendor = if hardware {
                     EncoderVendor::from_friendly_name(&friendly)
                 } else {
@@ -1943,10 +2022,11 @@ mod win {
                     transform,
                     events,
                     _dxgi_manager: manager,
+                    out_sample_pair,
                     info: EncoderInfo {
                         vendor,
                         friendly_name: friendly,
-                        codec: codec.as_str().to_string(),
+                        codec: effective_codec.as_str().to_string(),
                         hardware,
                         adapter_name: adapter_name.to_string(),
                         dedicated_vram_mb: vram_mb,
@@ -1958,7 +2038,7 @@ mod win {
                         fps_den: 1,
                         bitrate: bitrate_kbps * 1000,
                         profile: eAVEncH264VProfile_High.0 as u32,
-                        codec: if codec == Codec::H264 { 0 } else { 1 },
+                        codec: if effective_codec == Codec::H264 { 0 } else { 1 },
                         sequence_header,
                     },
                     async_mode,
@@ -2008,6 +2088,9 @@ mod win {
                 sample.SetSampleDuration(duration_hns).map_err(hr)?;
                 if force_key {
                     let _ = sample.SetUINT32(&MFSampleExtension_CleanPoint, 1);
+                    if let Ok(codec_api) = self.transform.cast::<ICodecAPI>() {
+                        let _ = set_codec_u32(&codec_api, &CODECAPI_AVEncVideoForceKeyFrame, 1);
+                    }
                 }
 
                 match self.transform.ProcessInput(0, &sample, 0) {
@@ -2032,9 +2115,15 @@ mod win {
 
                 loop {
                     let mut status = 0u32;
+                    let provided = if let Some((ref s, ref b, _)) = self.out_sample_pair {
+                        let _ = b.SetCurrentLength(0);
+                        Some(s.clone())
+                    } else {
+                        None
+                    };
                     let mut out = [MFT_OUTPUT_DATA_BUFFER {
                         dwStreamID: 0,
-                        pSample: std::mem::ManuallyDrop::new(None),
+                        pSample: std::mem::ManuallyDrop::new(provided),
                         dwStatus: 0,
                         pEvents: std::mem::ManuallyDrop::new(None),
                     }];
@@ -2077,8 +2166,10 @@ mod win {
                     buffer
                         .Lock(&mut ptr, Some(&mut max_len), Some(&mut cur_len))
                         .map_err(hr)?;
-                    let slice = std::slice::from_raw_parts(ptr, cur_len as usize);
-                    sink(slice, pts, dur, keyframe);
+                    if cur_len > 0 && !ptr.is_null() {
+                        let slice = std::slice::from_raw_parts(ptr, cur_len as usize);
+                        sink(slice, pts, dur, keyframe);
+                    }
                     let _ = buffer.Unlock();
                 }
             }
@@ -2301,17 +2392,32 @@ mod win {
                 create_mp4_sink_writer(path, header, !audio.is_empty())?;
 
             let base_pts = video.first().map(|p| p.pts_hns).unwrap_or(0);
-            for pkt in video {
-                let sample = make_sample(
-                    &pkt.data,
-                    pkt.pts_hns - base_pts,
-                    pkt.duration_hns,
-                    pkt.keyframe,
-                )?;
-                writer.WriteSample(vstream, &sample).map_err(hr)?;
-            }
-            if let Some(s) = astream {
-                for pkt in audio {
+            let mut vi = 0usize;
+            let mut ai = 0usize;
+            let has_audio = astream.is_some();
+
+            while vi < video.len() || (has_audio && ai < audio.len()) {
+                let take_video = match (
+                    video.get(vi),
+                    if has_audio { audio.get(ai) } else { None },
+                ) {
+                    (Some(vp), Some(ap)) => {
+                        (vp.pts_hns - base_pts).max(0) <= (ap.pts_hns - base_pts).max(0)
+                    }
+                    (Some(_), None) => true,
+                    (None, Some(_)) => false,
+                    (None, None) => break,
+                };
+
+                if take_video {
+                    let pkt = &video[vi];
+                    vi += 1;
+                    let t = (pkt.pts_hns - base_pts).max(0);
+                    let sample = make_sample(&pkt.data, t, pkt.duration_hns, pkt.keyframe)?;
+                    writer.WriteSample(vstream, &sample).map_err(hr)?;
+                } else if let Some(s) = astream {
+                    let pkt = &audio[ai];
+                    ai += 1;
                     let t = (pkt.pts_hns - base_pts).max(0);
                     let sample = make_sample(&pkt.data, t, pkt.duration_hns, true)?;
                     writer.WriteSample(s, &sample).map_err(hr)?;
@@ -2323,6 +2429,16 @@ mod win {
         }
     }
 
+    struct DirectWriterGuard(Arc<SharedState>);
+    impl Drop for DirectWriterGuard {
+        fn drop(&mut self) {
+            *self.0.direct_tx.lock() = None;
+            self.0.recording_active.store(false, Ordering::Release);
+            *self.0.recording_started_at.lock() = None;
+            *self.0.recording_path.write() = None;
+        }
+    }
+
     /// Streams encoded H.264/HEVC + AAC packets straight to an MP4 on disk
     /// (`Alt + R`), holding zero history in RAM. Waits for the first video
     /// keyframe before opening the `IMFSinkWriter` stream timeline.
@@ -2331,17 +2447,20 @@ mod win {
         header: &VideoFormatHeader,
         rx: mpsc::Receiver<EncodedPacket>,
         rec_bytes: Arc<AtomicU64>,
+        include_audio: bool,
+        shared: Arc<SharedState>,
     ) -> RResult<(f32, u64, bool)> {
         unsafe {
+            let _guard = DirectWriterGuard(Arc::clone(&shared));
             let _session = MfSession::new()?;
-            // Always declare the AAC stream if audio packets may arrive; if none
-            // arrive before finalize, MF still produces a valid video MP4.
             let mut writer_tuple: Option<(IMFSinkWriter, u32, Option<u32>)> = None;
             let mut base_pts: Option<i64> = None;
             let mut expected_gen: Option<u32> = None;
             let mut last_pts_end: i64 = 0;
             let mut wrote_audio = false;
-            let mut buffered_audio: Vec<EncodedPacket> = Vec::new();
+            let mut buffered_audio: VecDeque<EncodedPacket> = VecDeque::with_capacity(128);
+            let mut last_free_check = Instant::now();
+            let mut write_err: Option<RecorderError> = None;
 
             while let Ok(pkt) = rx.recv() {
                 if base_pts.is_none() {
@@ -2350,9 +2469,7 @@ mod win {
                             let bp = pkt.pts_hns;
                             base_pts = Some(bp);
                             expected_gen = Some(pkt.generation);
-                            let include_audio = true;
                             let wt = create_mp4_sink_writer(path, header, include_audio)?;
-                            // Drain any buffered audio aligned on or after base_pts.
                             if let Some(astream) = wt.2 {
                                 for ap in buffered_audio.drain(..) {
                                     if ap.generation == pkt.generation
@@ -2365,6 +2482,8 @@ mod win {
                                         wrote_audio = true;
                                     }
                                 }
+                            } else {
+                                buffered_audio.clear();
                             }
                             let vs = make_sample(&pkt.data, 0, pkt.duration_hns, true)?;
                             wt.0.WriteSample(wt.1, &vs).map_err(hr)?;
@@ -2372,12 +2491,27 @@ mod win {
                             last_pts_end = pkt.duration_hns.max(0);
                             writer_tuple = Some(wt);
                         }
-                        TrackKind::Audio if buffered_audio.len() < 128 => {
-                            buffered_audio.push(pkt);
+                        TrackKind::Audio if include_audio => {
+                            if buffered_audio.len() >= 128 {
+                                buffered_audio.pop_front();
+                            }
+                            buffered_audio.push_back(pkt);
                         }
                         _ => {}
                     }
                     continue;
+                }
+
+                if last_free_check.elapsed() >= Duration::from_secs(2) {
+                    last_free_check = Instant::now();
+                    if let Some(free) = free_disk_bytes(path) {
+                        if free < 32 * 1024 * 1024 {
+                            *shared.last_error.write() = Some(
+                                "Low disk space (< 32 MB free): finalized recording early.".into(),
+                            );
+                            break;
+                        }
+                    }
                 }
 
                 let bp = base_pts.unwrap();
@@ -2389,33 +2523,51 @@ mod win {
                 }
 
                 if let Some((ref writer, vstream, astream)) = writer_tuple {
-                    match pkt.track {
+                    let res = match pkt.track {
                         TrackKind::Video => {
                             let rel = (pkt.pts_hns - bp).max(0);
                             let s = make_sample(&pkt.data, rel, pkt.duration_hns, pkt.keyframe)?;
-                            writer.WriteSample(vstream, &s).map_err(hr)?;
-                            rec_bytes.fetch_add(pkt.data.len() as u64, Ordering::Relaxed);
                             last_pts_end = last_pts_end.max(rel + pkt.duration_hns);
+                            rec_bytes.fetch_add(pkt.data.len() as u64, Ordering::Relaxed);
+                            writer.WriteSample(vstream, &s).map_err(hr)
                         }
                         TrackKind::Audio => {
                             if let Some(astream) = astream {
                                 if pkt.pts_hns + pkt.duration_hns >= bp {
                                     let rel = (pkt.pts_hns - bp).max(0);
                                     let s = make_sample(&pkt.data, rel, pkt.duration_hns, true)?;
-                                    writer.WriteSample(astream, &s).map_err(hr)?;
                                     rec_bytes.fetch_add(pkt.data.len() as u64, Ordering::Relaxed);
                                     wrote_audio = true;
+                                    writer.WriteSample(astream, &s).map_err(hr)
+                                } else {
+                                    Ok(())
                                 }
+                            } else {
+                                Ok(())
                             }
                         }
+                    };
+                    if let Err(e) = res {
+                        write_err = Some(e);
+                        break;
                     }
                 }
             }
 
             if let Some((writer, _, _)) = writer_tuple {
-                writer.Finalize().map_err(hr)?;
+                let fin_res = writer.Finalize().map_err(hr);
                 let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
                 let dur = (last_pts_end as f64 / HNS_PER_SECOND as f64) as f32;
+                if let Some(e) = write_err {
+                    if fin_res.is_ok() && size_bytes > 0 {
+                        *shared.last_error.write() = Some(format!(
+                            "Recording stopped early due to write error ({e}); partial clip saved."
+                        ));
+                        return Ok((dur, size_bytes, wrote_audio));
+                    }
+                    return Err(e);
+                }
+                fin_res?;
                 Ok((dur, size_bytes, wrote_audio))
             } else {
                 Err(RecorderError::Other(
@@ -2482,6 +2634,7 @@ mod win {
             Ok(s) => s,
             Err(e) => {
                 shared.fail(format!("Media Foundation unavailable: {e}"));
+                shared.running.store(false, Ordering::Release);
                 return;
             }
         };
@@ -2530,7 +2683,7 @@ mod win {
                 (dst_w, dst_h)
             };
 
-            let converter = match ColorConverter::new(
+            let mut converter = match ColorConverter::new(
                 &gfx.device,
                 &gfx.context,
                 gfx.src_width,
@@ -2638,7 +2791,7 @@ mod win {
                         } else if let Some(res) = resource.take() {
                             match res.cast::<ID3D11Texture2D>() {
                                 Ok(t) => match converter.convert(&t) {
-                                    Ok(()) => {
+                                    Ok(_) => {
                                         has_converted_frame = true;
                                         frame_ready = true;
                                     }
@@ -2662,29 +2815,26 @@ mod win {
                         if gated {
                             was_gated = true;
                         } else if has_converted_frame {
-                            // Screen unchanged: reuse `converter.nv12` directly without
+                            // Screen unchanged: reuse current NV12 texture directly without
                             // touching DXGI or issuing ReleaseFrame() when nothing was acquired.
                             frame_ready = true;
                         }
                     }
                     Err(e) if is_device_lost(&e) => {
                         log::warn!("[kage] device lost during acquire: {e}");
-                        let _ = unsafe { gfx.duplication.ReleaseFrame() };
                         shared.device_resets.fetch_add(1, Ordering::Relaxed);
                         shared.generation.fetch_add(1, Ordering::AcqRel);
                         shared.set_state(EngineState::Recovering);
                         encoder.flush();
                         drop(encoder);
                         drop(converter);
-                        if gfx.reacquire_duplication(cfg.monitor_index).is_err() {
-                            std::thread::sleep(Duration::from_millis(backoff_ms));
-                        }
+                        drop(gfx);
+                        std::thread::sleep(Duration::from_millis(backoff_ms));
                         continue 'outer;
                     }
                     Err(e) => {
                         log::warn!("[kage] acquire error: {e}");
                         shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
-                        let _ = unsafe { gfx.duplication.ReleaseFrame() };
                         continue;
                     }
                 }
@@ -2721,7 +2871,12 @@ mod win {
                         }
                     }
 
-                    let accepted = match encoder.submit(&converter.nv12, pts, frame_hns, need_key) {
+                    let accepted = match encoder.submit(
+                        converter.current_nv12(),
+                        pts,
+                        frame_hns,
+                        need_key,
+                    ) {
                         Ok(true) => {
                             force_key = false;
                             if want_rec_key {
@@ -2754,7 +2909,17 @@ mod win {
                         let direct_sender = shared.direct_tx.lock().clone();
                         if let Some(tx) = direct_sender.as_ref() {
                             for pkt in &packet_batch {
-                                let _ = tx.try_send(pkt.clone());
+                                match tx.try_send(pkt.clone()) {
+                                    Ok(()) => {}
+                                    Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                                        shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
+                                        shared.force_key_record.store(true, Ordering::Release);
+                                    }
+                                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                                        *shared.direct_tx.lock() = None;
+                                        break;
+                                    }
+                                }
                             }
                         }
                         if use_ring {
@@ -2784,9 +2949,7 @@ mod win {
     }
 }
 
-// ===========================================================================
-//                  CROSS-PLATFORM / SIMULATION IMPLEMENTATION
-// ===========================================================================
+// Cross-platform / simulation implementation
 
 #[cfg(any(not(windows), feature = "headless-sim"))]
 mod sim {
@@ -2821,12 +2984,25 @@ mod sim {
         Ok(())
     }
 
+    struct SimWriterGuard(Arc<SharedState>);
+    impl Drop for SimWriterGuard {
+        fn drop(&mut self) {
+            *self.0.direct_tx.lock() = None;
+            self.0.recording_active.store(false, Ordering::Release);
+            *self.0.recording_started_at.lock() = None;
+            *self.0.recording_path.write() = None;
+        }
+    }
+
     pub(super) fn run_direct_writer(
         path: &Path,
         header: &VideoFormatHeader,
         rx: mpsc::Receiver<EncodedPacket>,
         rec_bytes: Arc<AtomicU64>,
+        include_audio: bool,
+        shared: Arc<SharedState>,
     ) -> RResult<(f32, u64, bool)> {
+        let _guard = SimWriterGuard(shared);
         let mut out = Vec::with_capacity(4096);
         out.extend_from_slice(&[
             0x00, 0x00, 0x00, 0x18, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm', 0x00, 0x00,
@@ -2851,7 +3027,7 @@ mod sim {
             let bp = base_pts.unwrap();
             if pkt.track == TrackKind::Video {
                 last_end = last_end.max((pkt.pts_hns - bp).max(0) + pkt.duration_hns);
-            } else {
+            } else if include_audio {
                 wrote_audio = true;
             }
             out.extend_from_slice(&pkt.data);
@@ -2977,9 +3153,7 @@ mod sim {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Platform dispatch
-// ---------------------------------------------------------------------------
 
 #[cfg(all(windows, not(feature = "headless-sim")))]
 use win as platform;
@@ -3012,9 +3186,7 @@ fn set_thread_priority(performance_mode: bool) {
     platform::boost_thread(performance_mode);
 }
 
-// ---------------------------------------------------------------------------
 // Monitor enumeration
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorInfo {
@@ -3030,7 +3202,11 @@ pub struct MonitorInfo {
 pub fn enumerate_monitors() -> Vec<MonitorInfo> {
     #[cfg(all(windows, not(feature = "headless-sim")))]
     {
+        use windows::core::PCWSTR;
         use windows::Win32::Graphics::Dxgi::*;
+        use windows::Win32::Graphics::Gdi::{
+            EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS,
+        };
         let mut out = Vec::new();
         unsafe {
             let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() else {
@@ -3043,6 +3219,10 @@ pub fn enumerate_monitors() -> Vec<MonitorInfo> {
                     ai += 1;
                     continue;
                 };
+                if (adesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0 {
+                    ai += 1;
+                    continue;
+                }
                 let adapter_name = String::from_utf16_lossy(
                     &adesc.Description[..adesc
                         .Description
@@ -3054,6 +3234,21 @@ pub fn enumerate_monitors() -> Vec<MonitorInfo> {
                 while let Ok(output) = adapter.EnumOutputs(oi) {
                     if let Ok(odesc) = output.GetDesc() {
                         let r = odesc.DesktopCoordinates;
+                        let mut dm = DEVMODEW {
+                            dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+                            ..Default::default()
+                        };
+                        let refresh_hz = if EnumDisplaySettingsW(
+                            PCWSTR(odesc.DeviceName.as_ptr()),
+                            ENUM_CURRENT_SETTINGS,
+                            &mut dm,
+                        )
+                        .as_bool()
+                        {
+                            dm.dmDisplayFrequency
+                        } else {
+                            0
+                        };
                         out.push(MonitorInfo {
                             index: flat,
                             name: String::from_utf16_lossy(
@@ -3065,7 +3260,7 @@ pub fn enumerate_monitors() -> Vec<MonitorInfo> {
                             ),
                             width: (r.right - r.left) as u32,
                             height: (r.bottom - r.top) as u32,
-                            refresh_hz: 0,
+                            refresh_hz,
                             primary: r.left == 0 && r.top == 0,
                             adapter: adapter_name.clone(),
                         });
@@ -3332,9 +3527,11 @@ mod ring_buffer_tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let engine = CaptureEngine::new();
-        let mut cfg = RecorderConfig::default();
-        cfg.output_dir = dir.clone();
-        cfg.target_fps = 60;
+        let cfg = RecorderConfig {
+            output_dir: dir.clone(),
+            target_fps: 60,
+            ..Default::default()
+        };
 
         let out_path = engine.start_recording(cfg, None).unwrap();
         assert!(engine.is_recording());
@@ -3342,7 +3539,7 @@ mod ring_buffer_tests {
         assert_eq!(engine.stats().ring_bytes, 0);
 
         std::thread::sleep(Duration::from_millis(250));
-        let res = engine.stop_recording().unwrap();
+        let (res, _) = engine.stop_recording().unwrap();
         assert!(!engine.is_recording());
         assert!(!engine.is_running());
         assert_eq!(res.path, out_path);
@@ -3360,9 +3557,11 @@ mod ring_buffer_tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let engine = CaptureEngine::new();
-        let mut cfg = RecorderConfig::default();
-        cfg.output_dir = dir.clone();
-        cfg.target_fps = 60;
+        let cfg = RecorderConfig {
+            output_dir: dir.clone(),
+            target_fps: 60,
+            ..Default::default()
+        };
 
         engine.start(cfg.clone()).unwrap();
         assert!(engine.is_running() && engine.is_ring_enabled());
@@ -3370,7 +3569,7 @@ mod ring_buffer_tests {
         let _ = engine.start_recording(cfg, None).unwrap();
         assert!(engine.is_recording());
         std::thread::sleep(Duration::from_millis(200));
-        let res = engine.stop_recording().unwrap();
+        let (res, _) = engine.stop_recording().unwrap();
 
         assert!(!engine.is_recording());
         assert!(engine.is_running() && engine.is_ring_enabled());

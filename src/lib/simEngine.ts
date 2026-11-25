@@ -474,6 +474,7 @@ export class SimEngine {
       audio_drift_ms: this.running ? Math.sin(performance.now() / 4200) * 1.4 : 0,
       audio_error: null,
       privacy_active: this.privacyGated,
+      ring_enabled: this.ringEnabled,
       uptime_seconds: this.running ? (performance.now() - this.startedAt) / 1000 : 0,
       last_error: this.lastError,
       recording_active: this.recordingActive,
@@ -635,21 +636,34 @@ export class SimEngine {
     return target.path;
   }
 
-  trim(path: string, start: number, end: number): ClipMetadata {
+  trim(
+    path: string,
+    start: number,
+    end: number,
+    suffix = "_trim",
+    overwrite = false,
+  ): ClipMetadata {
     const source = this.clips.find((c) => c.path === path);
     if (!source) throw new Error("clip not found");
     const duration = Math.max(0.1, end - start);
-    const fileName = source.file_name.replace(/\.mp4$/, "_trim.mp4");
+    const size = Math.round(
+      source.size_bytes * (duration / Math.max(source.duration_seconds, 0.1)),
+    );
+    if (overwrite) {
+      source.duration_seconds = duration;
+      source.size_bytes = size;
+      source.created_unix_ms = Date.now();
+      return { ...source };
+    }
+    const fileName = source.file_name.replace(/\.mp4$/, `${suffix}.mp4`);
     const clip: ClipMetadata = {
       ...source,
       id: `${fileName}-${Date.now()}`,
-      path: source.path.replace(/\.mp4$/, "_trim.mp4"),
+      path: source.path.replace(/\.mp4$/, `${suffix}.mp4`),
       file_name: fileName,
-      title: `${source.title} (trim)`,
+      title: `${source.title} (${suffix.replace(/^_/, "")})`,
       duration_seconds: duration,
-      size_bytes: Math.round(
-        source.size_bytes * (duration / Math.max(source.duration_seconds, 0.1)),
-      ),
+      size_bytes: size,
       created_unix_ms: Date.now(),
     };
     this.clips = [clip, ...this.clips];

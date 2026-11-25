@@ -179,9 +179,9 @@ const miniBox = createFrame({
   props: { fill: C.surface, cornerRadius: 28, stroke: C.divider, strokeWeight: 2 },
 });
 vector({ name: "MiniSpine", x: 30, y: 26, path: "M 0 0 L 15 0 L 15 76 L 0 76 Z", parent: miniBox, props: { fill: C.text } });
-vector({ name: "MiniUp", x: 45, y: 26, path: "M 0 38 L 38 0 L 55 0 L 12 43 Z", parent: miniBox, props: { fill: C.accent } });
-vector({ name: "MiniDown", x: 47, y: 62, path: "M 11 0 L 53 40 L 35 40 L 0 6 Z", parent: miniBox, props: { fill: C.accent } });
-circle({ name: "MiniRec", x: 84, y: 56, size: 16, parent: miniBox, props: { fill: C.recBright } });
+vector({ name: "MiniUp", x: 45, y: 26, path: "M 0 38 L 38 0 L 55 0 L 13 42 Z", parent: miniBox, props: { fill: C.accent } });
+vector({ name: "MiniDown", x: 45, y: 60, path: "M 13 0 L 55 42 L 38 42 L 0 4 Z", parent: miniBox, props: { fill: C.accent } });
+circle({ name: "MiniRec", x: 84, y: 56, size: 16, parent: miniBox, props: { fill: C.rec } });
 
 text({
   name: "WordmarkTitle",
@@ -189,7 +189,7 @@ text({
   x: 224,
   y: 66,
   parent: wordmarkFrame,
-  props: { fontFamily: "Playfair Display", fontSize: 68, fill: C.text, letterSpacing: 10 },
+  props: { fontFamily: "Instrument Serif", fontSize: 68, fill: C.text, letterSpacing: 10 },
 });
 text({
   name: "WordmarkSub",

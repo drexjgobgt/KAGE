@@ -51,6 +51,7 @@ export interface EngineStats {
   audio_drift_ms: number;
   audio_error: string | null;
   privacy_active: boolean;
+  ring_enabled: boolean;
   uptime_seconds: number;
   last_error: string | null;
   recording_active: boolean;

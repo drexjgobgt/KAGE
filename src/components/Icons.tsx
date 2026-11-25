@@ -23,7 +23,7 @@ export function KageLogo({ className = "w-7 h-7", ...props }: IconProps) {
       {/* Upper diagonal blade */}
       <path d="M12.5 16L21.5 7.5H25L15 17.5L12.5 16Z" fill="#E6C29F" />
       {/* Lower diagonal blade */}
-      <path d="M14.2 15.8L25 24.5H20.8L12.5 17.5L14.2 15.8Z" fill="#F3ECE4" />
+      <path d="M14.2 15.8L25 24.5H20.8L12.5 17.5L14.2 15.8Z" fill="#E6C29F" />
       {/* Crimson REC shutter dot */}
       <circle cx="24" cy="16" r="2.2" fill="#E5484D" />
     </svg>

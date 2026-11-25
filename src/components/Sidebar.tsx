@@ -42,7 +42,10 @@ export function Sidebar({
   activeProfileName,
   ecoActive,
 }: SidebarProps) {
-  const vendor = VENDOR_LABEL[stats.encoder.vendor] ?? stats.encoder.codec;
+  const vendor =
+    stats.state === "idle" && stats.encoder.vendor === "unavailable"
+      ? "Standby"
+      : (VENDOR_LABEL[stats.encoder.vendor] ?? stats.encoder.codec);
 
   return (
     <aside className="flex w-[204px] shrink-0 flex-col justify-between border-r border-[#282320] bg-[#0D0B0A] p-3">
@@ -91,9 +94,13 @@ export function Sidebar({
                 )}
                 {id === "telemetry" && stats.last_error && (
                   <span
+                    role="status"
+                    aria-label={`Engine error: ${stats.last_error}`}
                     title={stats.last_error}
-                    className="h-2 w-2 rounded-full bg-[#FF6B6F]"
-                  />
+                    className="rounded bg-[#C92A32] px-1.5 py-0.5 font-mono text-[9px] font-bold text-white"
+                  >
+                    ERR
+                  </span>
                 )}
               </button>
             );

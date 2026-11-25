@@ -41,9 +41,10 @@ export const DEFAULT_GALLERY_STATE: GalleryState = {
   compact: false,
 };
 
-export const GALLERY_STORAGE_KEY = "clipflow.gallery.state.v1";
+export const GALLERY_STORAGE_KEY = "kage.gallery.state.v1";
+const LEGACY_GALLERY_STORAGE_KEY = "clipflow.gallery.state.v1";
 
-/** Longest query worth keeping — guards against junk data. */
+/** Longest query worth keeping (guards against junk data). */
 const MAX_QUERY_LENGTH = 200;
 
 const isSortKey = (v: unknown): v is SortKey =>
@@ -72,11 +73,13 @@ export function loadGalleryState(
   storage: Pick<Storage, "getItem"> = localStorage,
 ): GalleryState {
   try {
-    const raw = storage.getItem(GALLERY_STORAGE_KEY);
+    const raw =
+      storage.getItem(GALLERY_STORAGE_KEY) ??
+      storage.getItem(LEGACY_GALLERY_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_GALLERY_STATE };
     return sanitizeGalleryState(JSON.parse(raw));
   } catch {
-    // Unreadable / corrupt blob — start fresh.
+    // Unreadable or corrupt blob: start fresh.
     return { ...DEFAULT_GALLERY_STATE };
   }
 }
@@ -88,6 +91,6 @@ export function saveGalleryState(
   try {
     storage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(state));
   } catch {
-    // Storage unavailable (e.g. disabled) — the filter simply won't persist.
+    // Storage unavailable (e.g. disabled): filter simply will not persist.
   }
 }

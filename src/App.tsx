@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ClipTrimmerModal } from "./components/ClipTrimmerModal";
 import { Sidebar, type AppTab } from "./components/Sidebar";
 import { TitleBar } from "./components/TitleBar";
 import { TransportBar } from "./components/TransportBar";
-import { kage } from "./lib/bridge";
+import { DEFAULT_SETTINGS, kage } from "./lib/bridge";
 import { formatBytes, formatDuration } from "./lib/format";
 import {
   DEFAULT_GALLERY_STATE,
@@ -36,67 +35,24 @@ import { SettingsView } from "./views/SettingsView";
 import { StudioView } from "./views/StudioView";
 import { TelemetryView } from "./views/TelemetryView";
 
-const DEFAULT_SETTINGS: AppSettings = {
-  bufferSeconds: 120,
-  targetFps: 60,
-  bitrateKbps: 20000,
-  codec: "h264",
-  monitorIndex: 0,
-  captureSystemAudio: true,
-  captureMicrophone: false,
-  outputDir: "C:\\Users\\You\\Videos\\KAGE",
-  hotkeySave: "Alt+C",
-  hotkeyToggle: "Alt+Shift+C",
-  hotkeyRecord: "Alt+R",
-  openTrimmerAfterSave: true,
-  minimizeToTray: true,
-  autostartBuffer: true,
-  playSaveSound: true,
-  alwaysOnTop: false,
-  profiles: [
-    {
-      id: "default",
-      name: "Default",
-      bufferSeconds: 120,
-      targetFps: 60,
-      bitrateKbps: 20000,
-      codec: "h264",
-    },
-  ],
-  profileMap: [],
-  autoSwitchProfiles: false,
-  launchAtStartup: false,
-  autoCleanupDays: 0,
-  organizeByGame: false,
-  autosaveOnGameExit: false,
-  performanceMode: true,
-  privacyPauseWhenUnfocused: false,
-  gameVolume: 100,
-  micVolume: 100,
-  micDeviceId: null,
-  adaptiveEco: false,
-  ecoBatteryThresholdPct: 25,
-  ecoRamFreeGbs: 2,
-};
-
 const EMPTY_STATS: EngineStats = {
   state: "idle",
   encoder: {
-    vendor: "nvenc",
-    friendly_name: "Hardware Encoder",
+    vendor: "unavailable",
+    friendly_name: "Standby",
     codec: "H.264",
-    hardware: true,
-    adapter_name: "GPU Adapter",
-    dedicated_vram_mb: 8192,
+    hardware: false,
+    adapter_name: "--",
+    dedicated_vram_mb: 0,
   },
-  width: 1920,
-  height: 1080,
-  target_fps: 60,
-  bitrate_kbps: 20000,
-  performance_mode: true,
+  width: 0,
+  height: 0,
+  target_fps: DEFAULT_SETTINGS.targetFps,
+  bitrate_kbps: DEFAULT_SETTINGS.bitrateKbps,
+  performance_mode: DEFAULT_SETTINGS.performanceMode,
   integrated_gpu: false,
   capture_fps: 0,
-  buffer_seconds: 120,
+  buffer_seconds: DEFAULT_SETTINGS.bufferSeconds,
   buffered_seconds: 0,
   ring_bytes: 0,
   ring_frames: 0,
@@ -105,11 +61,12 @@ const EMPTY_STATS: EngineStats = {
   gpu_submit_ms_avg: 0,
   dropped_frames: 0,
   device_resets: 0,
-  audio_system: true,
-  audio_mic: false,
+  audio_system: DEFAULT_SETTINGS.captureSystemAudio,
+  audio_mic: DEFAULT_SETTINGS.captureMicrophone,
   audio_drift_ms: 0,
   audio_error: null,
   privacy_active: false,
+  ring_enabled: false,
   uptime_seconds: 0,
   last_error: null,
   recording_active: false,
@@ -127,23 +84,32 @@ interface Toast {
 
 const PRIVACY_HYSTERESIS_MS = 10_000;
 const ECO_HYSTERESIS_MS = 10_000;
+const MODIFIER_NAMES = new Set(["alt", "ctrl", "control", "shift", "win", "meta"]);
 
 function matchesShortcut(e: KeyboardEvent, accel: string): boolean {
+  if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return false;
   const parts = accel
     .split("+")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  if (parts.length < 2) return false;
+  const nonMods = parts.filter((t) => !MODIFIER_NAMES.has(t));
+  if (parts.length < 2 || nonMods.length !== 1) return false;
+  const targetKey = nonMods[0];
+  const codeNorm = /^key[a-z]$/i.test(e.code)
+    ? e.code.slice(3).toLowerCase()
+    : /^digit[0-9]$/i.test(e.code)
+      ? e.code.slice(5)
+      : e.code.toLowerCase();
   return (
     parts.includes("alt") === e.altKey &&
-    parts.includes("ctrl") === e.ctrlKey &&
+    (parts.includes("ctrl") || parts.includes("control")) === e.ctrlKey &&
     parts.includes("shift") === e.shiftKey &&
-    parts.includes("win") === e.metaKey &&
-    parts.some((t) => e.key.toLowerCase() === t || e.code.toLowerCase() === t)
+    (parts.includes("win") || parts.includes("meta")) === e.metaKey &&
+    (e.key.toLowerCase() === targetKey || codeNorm === targetKey)
   );
 }
 
-function DeckShell() {
+export default function App() {
   const native = kage.isTauri();
   const [tab, setTab] = useState<AppTab>("studio");
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -165,7 +131,10 @@ function DeckShell() {
     EMPTY_SELECTION,
   );
   const [selectMode, setSelectMode] = useState(false);
-  const selectedPaths = new Set<string>(selection.selected);
+  const selectedPaths = useMemo(
+    () => new Set<string>(selection.selected),
+    [selection.selected],
+  );
 
   const [activeClip, setActiveClip] = useState<ClipMetadata | null>(null);
   const [activeFlushMs, setActiveFlushMs] = useState<number | undefined>();
@@ -207,7 +176,7 @@ function DeckShell() {
       const bytes = await kage.getDiskFreeBytes();
       setDiskFreeBytes(bytes);
     } catch {
-      /* ignore */
+      /* disk telemetry optional */
     }
   }, []);
 
@@ -244,8 +213,8 @@ function DeckShell() {
         setMonitors(mons);
         setAudioDevices(devs);
         setDiskFreeBytes(free);
-      } catch {
-        /* keep defaults */
+      } catch (e) {
+        if (!cancelled) pushToast("warn", "Settings load fallback", String(e));
       }
 
       try {
@@ -288,59 +257,49 @@ function DeckShell() {
     const offs: Array<() => void> = [];
     let disposed = false;
     const attach = (p: Promise<() => void>) => {
-      void p.then((off) => {
-        if (disposed) off();
-        else offs.push(off);
-      });
+      void p
+        .then((off) => {
+          if (disposed) off();
+          else offs.push(off);
+        })
+        .catch(() => {});
     };
 
-    attach(Promise.resolve(kage.onStats((s) => setStats(s))));
-    attach(Promise.resolve(kage.onBufferState((s) => setStats(s))));
-    attach(Promise.resolve(kage.onRecordingState((s) => setStats(s))));
+    attach(kage.onStats((s) => setStats(s)));
+    attach(kage.onBufferState((s) => setStats(s)));
+    attach(kage.onRecordingState((s) => setStats(s)));
     attach(
-      Promise.resolve(
-        kage.onClipSaved((payload: ClipSavedPayload) => {
-          setClips((prev) => [
-            payload.clip,
-            ...prev.filter((c) => c.path !== payload.clip.path),
-          ]);
-          setSessionSaves((n) => n + 1);
-          setSessionBytes((b) => b + payload.clip.size_bytes);
-          void refreshDiskFree();
-          if (settingsRef.current.playSaveSound) playSaveSound();
-          const isDirectRec = payload.triggeredBy.startsWith("record");
-          pushToast(
-            "ok",
-            isDirectRec
-              ? "Recording saved to MP4"
-              : `Replay saved in ${payload.flushMs.toFixed(1)} ms`,
-            `${payload.clip.file_name} (${formatDuration(payload.clip.duration_seconds)}, ${formatBytes(
-              payload.clip.size_bytes,
-            )})`,
-          );
-          if (payload.openTrimmer ?? settingsRef.current.openTrimmerAfterSave) {
-            setActiveClip(payload.clip);
-            setActiveFlushMs(isDirectRec ? undefined : payload.flushMs);
-          }
-        }),
-      ),
+      kage.onClipSaved((payload: ClipSavedPayload) => {
+        setClips((prev) => [
+          payload.clip,
+          ...prev.filter((c) => c.path !== payload.clip.path),
+        ]);
+        setSessionSaves((n) => n + 1);
+        setSessionBytes((b) => b + payload.clip.size_bytes);
+        void refreshDiskFree();
+        if (settingsRef.current.playSaveSound) playSaveSound();
+        const isDirectRec = payload.triggeredBy.startsWith("record");
+        pushToast(
+          "ok",
+          isDirectRec
+            ? "Recording saved to MP4"
+            : `Replay saved in ${payload.flushMs.toFixed(1)} ms`,
+          `${payload.clip.file_name} (${formatDuration(payload.clip.duration_seconds)}, ${formatBytes(
+            payload.clip.size_bytes,
+          )})`,
+        );
+        if (payload.openTrimmer ?? settingsRef.current.openTrimmerAfterSave) {
+          setActiveClip(payload.clip);
+          setActiveFlushMs(isDirectRec ? undefined : payload.flushMs);
+        }
+      }),
     );
+    attach(kage.onError((msg) => pushToast("err", "Engine error", String(msg))));
+    attach(kage.onHotkey((accel) => pushToast("info", `${accel} triggered`)));
     attach(
-      Promise.resolve(
-        kage.onError((msg) => pushToast("err", "Engine error", String(msg))),
-      ),
-    );
-    attach(
-      Promise.resolve(
-        kage.onHotkey((accel) => pushToast("info", `${accel} triggered`)),
-      ),
-    );
-    attach(
-      Promise.resolve(
-        kage.onDeckHidden(() => {
-          clearThumbnailCache();
-        }),
-      ),
+      kage.onDeckHidden(() => {
+        clearThumbnailCache();
+      }),
     );
 
     return () => {
@@ -372,26 +331,22 @@ function DeckShell() {
     async (maxSeconds?: number) => {
       setBusy(true);
       try {
-        const clip = await kage.saveInstantReplay(maxSeconds, "ui");
-        if (!native) return;
-        setClips((prev) => [clip, ...prev.filter((c) => c.path !== clip.path)]);
-        setSessionSaves((n) => n + 1);
-        setSessionBytes((b) => b + clip.size_bytes);
-        void refreshDiskFree();
-        if (settingsRef.current.openTrimmerAfterSave) setActiveClip(clip);
+        await kage.saveInstantReplay(maxSeconds, "ui");
       } catch (e) {
         pushToast("err", "Replay save failed", String(e));
       } finally {
         setBusy(false);
       }
     },
-    [native, pushToast, refreshDiskFree],
+    [pushToast],
   );
 
   const handleToggleBuffer = useCallback(async () => {
     setBusy(true);
     try {
-      const armed = stats.state === "buffering" || stats.state === "flushing";
+      const armed =
+        (stats.state === "buffering" || stats.state === "flushing") &&
+        stats.ring_enabled;
       const next = armed
         ? await kage.stopBuffer()
         : await kage.startBuffer(settings.bufferSeconds, settings.targetFps);
@@ -408,7 +363,7 @@ function DeckShell() {
     } finally {
       setBusy(false);
     }
-  }, [stats.state, settings.bufferSeconds, settings.targetFps, pushToast]);
+  }, [stats.state, stats.ring_enabled, settings.bufferSeconds, settings.targetFps, pushToast]);
 
   const handleToggleRecord = useCallback(async () => {
     setBusy(true);
@@ -420,7 +375,7 @@ function DeckShell() {
         pushToast(
           "info",
           "Direct recording started",
-          `Press ${settings.hotkeyRecord} or STOP REC to finish MP4.`,
+          `Press ${settings.hotkeyRecord} or Stop Recording to finish MP4.`,
         );
       }
     } catch (e) {
@@ -429,6 +384,20 @@ function DeckShell() {
       setBusy(false);
     }
   }, [stats.recording_active, settings.hotkeyRecord, pushToast]);
+
+  const handleRestartEngine = useCallback(() => {
+    setBusy(true);
+    const s = settingsRef.current;
+    void kage
+      .stopBuffer()
+      .then(() => kage.startBuffer(s.bufferSeconds, s.targetFps))
+      .then((next) => {
+        setStats(next);
+        pushToast("ok", "Engine restarted", next.encoder.friendly_name);
+      })
+      .catch((e) => pushToast("err", "Restart failed", String(e)))
+      .finally(() => setBusy(false));
+  }, [pushToast]);
 
   // Browser preview keyboard shim for Alt+C / Alt+R / Alt+Shift+C
   useEffect(() => {
@@ -463,12 +432,15 @@ function DeckShell() {
         if (patch.bufferSeconds || patch.targetFps || patch.bitrateKbps || patch.codec) {
           setActiveProfileId(null);
         }
-        if (patch.outputDir) void refreshDiskFree();
+        if (patch.outputDir) {
+          void refreshDiskFree();
+          void refreshClips();
+        }
       } catch (e) {
         pushToast("err", "Could not persist settings", String(e));
       }
     },
-    [pushToast, refreshDiskFree],
+    [pushToast, refreshClips, refreshDiskFree],
   );
 
   // Profiles & Foreground Polling (opt-in)
@@ -494,7 +466,7 @@ function DeckShell() {
           "ok",
           profile ? `${profile.name} profile active` : "Profile applied",
           needsRestart
-            ? `Buffer ${next.bufferSeconds}s live. Restart engine in Telemetry for codec or FPS changes.`
+            ? `Buffer ${next.bufferSeconds}s live. Restart engine in Settings or Telemetry for codec or FPS changes.`
             : `Buffer ${next.bufferSeconds}s at ${next.targetFps}fps live now.`,
         );
         const exe = gameExe ?? foreground?.exe;
@@ -549,6 +521,7 @@ function DeckShell() {
 
       if (
         lastFocusedExe &&
+        !shouldGateForForeground(lastFocusedExe) &&
         exe !== lastFocusedExe &&
         settingsRef.current.autosaveOnGameExit
       ) {
@@ -590,7 +563,9 @@ function DeckShell() {
         }
       } else {
         const gate = privacyHysteresis.current!.tick(false, false);
-        if (gate !== null) await kage.setPrivacyGate(false);
+        if (gate !== null) {
+          await kage.setPrivacyGate(false).catch(() => {});
+        }
       }
 
       if (!settingsRef.current.autoSwitchProfiles || !exe || exe === lastSwitchExe) return;
@@ -624,7 +599,7 @@ function DeckShell() {
     if (!settings.adaptiveEco) {
       if (ecoAppliedBuffer.current !== null) {
         ecoAppliedBuffer.current = null;
-        void kage.setBufferSeconds(settingsRef.current.bufferSeconds);
+        void kage.setBufferSeconds(settingsRef.current.bufferSeconds).catch(() => {});
       }
       setEcoActive(false);
       setPowerNow(null);
@@ -643,22 +618,20 @@ function DeckShell() {
       setPowerNow(power);
       const s = settingsRef.current;
       const decision = decideEco(power, s);
-      setEcoActive(decision.active);
       const flip = ecoHysteresis.current!.tick(decision.active);
-      const target = decision.active ? decision.ecoBufferSeconds : s.bufferSeconds;
-      if (ecoAppliedBuffer.current === target) {
-        if (flip !== null) ecoHysteresis.current!.commit(flip);
-        return;
-      }
+      if (flip === null) return;
+
+      const target = flip ? decision.ecoBufferSeconds : s.bufferSeconds;
       try {
         await kage.setBufferSeconds(target);
+        ecoHysteresis.current!.commit(flip);
         ecoAppliedBuffer.current = target;
-        if (flip !== null) ecoHysteresis.current!.commit(flip);
+        setEcoActive(flip);
         pushToast(
           "info",
-          decision.active ? "ECO mode active" : "ECO mode off",
-          decision.active
-            ? `${decision.reason === "battery" ? "Battery low" : "Low free RAM"}: buffer set to ${decision.ecoBufferSeconds}s.`
+          flip ? "ECO mode active" : "ECO mode off",
+          flip
+            ? `${decision.reason === "battery" ? "Battery low" : "Low free RAM"}: buffer set to ${target}s.`
             : `Full ${s.bufferSeconds}s buffer restored.`,
         );
       } catch {
@@ -701,6 +674,69 @@ function DeckShell() {
     }
   }, [native, patchSettings, pushToast]);
 
+  const handleOpenClip = useCallback((c: ClipMetadata) => {
+    setActiveClip(c);
+    setActiveFlushMs(undefined);
+  }, []);
+
+  const handleCopyClip = useCallback(
+    (c: ClipMetadata) => {
+      void kage
+        .copyClip(c.path)
+        .then(() => pushToast("ok", "Copied to clipboard", c.file_name))
+        .catch((e) => pushToast("err", "Copy failed", String(e)));
+    },
+    [pushToast],
+  );
+
+  const handleRevealClip = useCallback(
+    (c: ClipMetadata) => {
+      void kage
+        .revealClip(c.path)
+        .catch((e) => pushToast("err", "Could not open Explorer", String(e)));
+    },
+    [pushToast],
+  );
+
+  const handleOpenExternalClip = useCallback(
+    (c: ClipMetadata) => {
+      void kage
+        .openClip(c.path)
+        .catch((e) => pushToast("err", "Could not launch player", String(e)));
+    },
+    [pushToast],
+  );
+
+  const handleDeleteClip = useCallback(
+    (c: ClipMetadata) => {
+      void kage
+        .deleteClip(c.path)
+        .then(() => {
+          setClips((prev) => prev.filter((x) => x.path !== c.path));
+          dispatchSelection({ type: "clear" });
+          if (activeClipRef.current?.path === c.path) setActiveClip(null);
+          pushToast("warn", "Clip deleted", c.file_name);
+          void refreshDiskFree();
+        })
+        .catch((e) => pushToast("err", "Delete failed", String(e)));
+    },
+    [pushToast, refreshDiskFree],
+  );
+
+  const handleToggleFavorite = useCallback(
+    (c: ClipMetadata) => {
+      const next = !c.favorite;
+      setClips((prev) =>
+        prev.map((x) => (x.path === c.path ? { ...x, favorite: next } : x)),
+      );
+      setActiveClip((cur) => (cur && cur.path === c.path ? { ...cur, favorite: next } : cur));
+      void kage
+        .setClipFavorite(c.path, next)
+        .catch((e) => pushToast("err", "Could not update favorite", String(e)));
+    },
+    [pushToast],
+  );
+
   const activeProfileName =
     settings.profiles.find((p) => p.id === activeProfileId)?.name ?? null;
 
@@ -709,7 +745,11 @@ function DeckShell() {
       <TitleBar
         stats={stats}
         minimizeToTray={settings.minimizeToTray}
-        onOpenFolder={() => void kage.openOutputFolder()}
+        onOpenFolder={() =>
+          void kage
+            .openOutputFolder()
+            .catch((e) => pushToast("err", "Could not open folder", String(e)))
+        }
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -739,35 +779,12 @@ function DeckShell() {
               onToggleRecord={() => void handleToggleRecord()}
               onToggleBuffer={() => void handleToggleBuffer()}
               onPatchSettings={(p) => void patchSettings(p)}
-              onOpenClip={(c) => {
-                setActiveClip(c);
-                setActiveFlushMs(undefined);
-              }}
-              onCopyClip={(c) =>
-                void kage
-                  .copyClip(c.path)
-                  .then(() => pushToast("ok", "Copied to clipboard", c.file_name))
-                  .catch((e) => pushToast("err", "Copy failed", String(e)))
-              }
-              onRevealClip={(c) => void kage.revealClip(c.path)}
-              onOpenExternalClip={(c) => void kage.openClip(c.path)}
-              onDeleteClip={(c) =>
-                void kage
-                  .deleteClip(c.path)
-                  .then(() => {
-                    setClips((prev) => prev.filter((x) => x.path !== c.path));
-                    pushToast("warn", "Clip deleted", c.file_name);
-                    void refreshDiskFree();
-                  })
-                  .catch((e) => pushToast("err", "Delete failed", String(e)))
-              }
-              onToggleFavorite={(c) => {
-                const next = !c.favorite;
-                setClips((prev) =>
-                  prev.map((x) => (x.path === c.path ? { ...x, favorite: next } : x)),
-                );
-                void kage.setClipFavorite(c.path, next);
-              }}
+              onOpenClip={handleOpenClip}
+              onCopyClip={handleCopyClip}
+              onRevealClip={handleRevealClip}
+              onOpenExternalClip={handleOpenExternalClip}
+              onDeleteClip={handleDeleteClip}
+              onToggleFavorite={handleToggleFavorite}
               onOpenLibrary={() => setTab("library")}
               onRetryClips={() => void refreshClips()}
             />
@@ -787,11 +804,11 @@ function DeckShell() {
                 setSelectMode((s) => !s);
                 dispatchSelection({ type: "clear" });
               }}
-              onSelectClip={(clip, mods) =>
+              onSelectClip={(clip, mods, visibleOrder) =>
                 dispatchSelection({
                   type: "click",
                   path: clip.path,
-                  order: clips.map((c) => c.path),
+                  order: visibleOrder,
                   ctrl: mods.ctrl,
                   shift: mods.shift,
                 })
@@ -803,56 +820,48 @@ function DeckShell() {
                 })
               }
               onClearSelection={() => dispatchSelection({ type: "clear" })}
-              onOpenClip={(c) => {
-                setActiveClip(c);
-                setActiveFlushMs(undefined);
-              }}
-              onCopyClip={(c) =>
-                void kage
-                  .copyClip(c.path)
-                  .then(() => pushToast("ok", "Copied to clipboard", c.file_name))
-              }
-              onRevealClip={(c) => void kage.revealClip(c.path)}
-              onOpenExternalClip={(c) => void kage.openClip(c.path)}
-              onDeleteClip={(c) =>
-                void kage.deleteClip(c.path).then(() => {
-                  setClips((prev) => prev.filter((x) => x.path !== c.path));
-                  pushToast("warn", "Clip deleted", c.file_name);
-                })
-              }
-              onToggleFavorite={(c) => {
-                const next = !c.favorite;
-                setClips((prev) =>
-                  prev.map((x) => (x.path === c.path ? { ...x, favorite: next } : x)),
-                );
-                void kage.setClipFavorite(c.path, next);
-              }}
+              onOpenClip={handleOpenClip}
+              onCopyClip={handleCopyClip}
+              onRevealClip={handleRevealClip}
+              onOpenExternalClip={handleOpenExternalClip}
+              onDeleteClip={handleDeleteClip}
+              onToggleFavorite={handleToggleFavorite}
               onBatchCopy={() =>
                 void kage
                   .copyClips(selection.selected)
                   .then(() =>
                     pushToast("ok", `Copied ${selection.selected.length} clips to clipboard`),
                   )
+                  .catch((e) => pushToast("err", "Batch copy failed", String(e)))
               }
               onBatchFavorite={(fav) =>
-                void kage.setClipsFavorite(selection.selected, fav).then(() => {
-                  setClips((prev) =>
-                    prev.map((c) =>
-                      selectedPaths.has(c.path) ? { ...c, favorite: fav } : c,
-                    ),
-                  );
-                })
+                void kage
+                  .setClipsFavorite(selection.selected, fav)
+                  .then(() => {
+                    setClips((prev) =>
+                      prev.map((c) =>
+                        selectedPaths.has(c.path) ? { ...c, favorite: fav } : c,
+                      ),
+                    );
+                  })
+                  .catch((e) => pushToast("err", "Batch favorite failed", String(e)))
               }
               onBatchTag={(tag) =>
-                void kage.addClipsTag(selection.selected, tag).then(() => void refreshClips())
+                void kage
+                  .addClipsTag(selection.selected, tag)
+                  .then(() => void refreshClips())
+                  .catch((e) => pushToast("err", "Batch tag failed", String(e)))
               }
               onBatchDelete={() =>
-                void kage.deleteClips(selection.selected).then((count) => {
-                  setClips((prev) => prev.filter((c) => !selectedPaths.has(c.path)));
-                  dispatchSelection({ type: "clear" });
-                  pushToast("warn", `Deleted ${count} clips`);
-                  void refreshDiskFree();
-                })
+                void kage
+                  .deleteClips(selection.selected)
+                  .then((count) => {
+                    setClips((prev) => prev.filter((c) => !selectedPaths.has(c.path)));
+                    dispatchSelection({ type: "clear" });
+                    pushToast("warn", `Deleted ${count} clips`);
+                    void refreshDiskFree();
+                  })
+                  .catch((e) => pushToast("err", "Batch delete failed", String(e)))
               }
               onRefresh={() => void refreshClips()}
               hotkeySave={settings.hotkeySave}
@@ -880,15 +889,26 @@ function DeckShell() {
                 }
               }}
               onDeleteProfile={(id) =>
-                void kage.deleteProfile(id).then((next) => {
-                  setSettings(next);
-                  pushToast("warn", "Profile deleted", id);
-                })
+                void kage
+                  .deleteProfile(id)
+                  .then((next) => {
+                    setSettings(next);
+                    pushToast("warn", "Profile deleted", id);
+                  })
+                  .catch((e) => pushToast("err", "Delete failed", String(e)))
               }
               onSetProfileMap={(map: ProfileMapEntry[]) =>
-                void kage.setProfileMap(map).then(setSettings)
+                void kage
+                  .setProfileMap(map)
+                  .then(setSettings)
+                  .catch((e) => pushToast("err", "Could not update mappings", String(e)))
               }
-              onRefreshForeground={() => void kage.getForegroundGame().then(setForeground)}
+              onRefreshForeground={() =>
+                void kage
+                  .getForegroundGame()
+                  .then(setForeground)
+                  .catch((e) => pushToast("err", "Foreground query failed", String(e)))
+              }
             />
           )}
 
@@ -897,20 +917,7 @@ function DeckShell() {
               stats={stats}
               diskFreeBytes={diskFreeBytes}
               busy={busy}
-              onRestartEngine={() => {
-                setBusy(true);
-                void kage
-                  .stopBuffer()
-                  .then(() =>
-                    kage.startBuffer(settings.bufferSeconds, settings.targetFps),
-                  )
-                  .then((next) => {
-                    setStats(next);
-                    pushToast("ok", "Engine restarted", next.encoder.friendly_name);
-                  })
-                  .catch((e) => pushToast("err", "Restart failed", String(e)))
-                  .finally(() => setBusy(false));
-              }}
+              onRestartEngine={handleRestartEngine}
               onSimulateDeviceLoss={() =>
                 void kage
                   .simulateDeviceLoss()
@@ -927,14 +934,20 @@ function DeckShell() {
           {tab === "settings" && (
             <SettingsView
               settings={settings}
+              stats={stats}
               monitors={monitors}
               audioDevices={audioDevices}
               powerNow={powerNow}
               diskFreeBytes={diskFreeBytes}
               busy={busy}
               onPatchSettings={(p) => void patchSettings(p)}
+              onRestartEngine={handleRestartEngine}
               onChooseOutputFolder={() => void chooseOutputFolder()}
-              onOpenOutputFolder={() => void kage.openOutputFolder()}
+              onOpenOutputFolder={() =>
+                void kage
+                  .openOutputFolder()
+                  .catch((e) => pushToast("err", "Could not open folder", String(e)))
+              }
               onCleanupNow={() =>
                 void kage
                   .cleanupOldClips(settings.autoCleanupDays)
@@ -942,6 +955,7 @@ function DeckShell() {
                     pushToast("info", `Cleanup removed ${n} old clip${n === 1 ? "" : "s"}`);
                     void refreshClips();
                   })
+                  .catch((e) => pushToast("err", "Cleanup failed", String(e)))
               }
             />
           )}
@@ -963,33 +977,22 @@ function DeckShell() {
           flushMs={activeFlushMs}
           onClose={() => setActiveClip(null)}
           onTrimSaved={() => void refreshClips()}
-          onDeleted={(c) =>
-            void kage.deleteClip(c.path).then(() => {
-              setClips((prev) => prev.filter((x) => x.path !== c.path));
-              if (activeClipRef.current?.path === c.path) setActiveClip(null);
-              pushToast("warn", "Clip deleted", c.file_name);
-            })
-          }
+          onDeleted={handleDeleteClip}
           onRenamed={(oldPath, next) => {
             setClips((prev) =>
               prev.map((x) => (x.path === oldPath ? next : x)),
             );
             setActiveClip(next);
           }}
-          onToggleFavorite={(c) => {
-            const next = !c.favorite;
-            setClips((prev) =>
-              prev.map((x) => (x.path === c.path ? { ...x, favorite: next } : x)),
-            );
-            setActiveClip((cur) => (cur && cur.path === c.path ? { ...cur, favorite: next } : cur));
-            void kage.setClipFavorite(c.path, next);
-          }}
+          onToggleFavorite={handleToggleFavorite}
           onUpdateTags={(c, nextTags) => {
             setClips((prev) =>
               prev.map((x) => (x.path === c.path ? { ...x, tags: nextTags } : x)),
             );
             setActiveClip((cur) => (cur && cur.path === c.path ? { ...cur, tags: nextTags } : cur));
-            void kage.setClipTags(c.path, nextTags);
+            void kage
+              .setClipTags(c.path, nextTags)
+              .catch((e) => pushToast("err", "Tag update failed", String(e)));
           }}
           onToast={pushToast}
         />
@@ -1025,13 +1028,5 @@ function DeckShell() {
         })}
       </div>
     </div>
-  );
-}
-
-export default function App() {
-  return (
-    <ErrorBoundary>
-      <DeckShell />
-    </ErrorBoundary>
   );
 }

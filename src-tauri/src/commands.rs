@@ -115,6 +115,9 @@ pub async fn start_recording(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<EngineStats, String> {
+    if let Some(msg) = privacy_blocked_message(&state, None) {
+        return Err(msg);
+    }
     let cfg = {
         let s = state.settings.read();
         s.active_profile()
@@ -142,11 +145,10 @@ pub async fn stop_recording(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ClipMetadata, String> {
-    let game_folder = resolve_game_folder(&state, None);
     let engine = Arc::clone(&state.engine);
-    let (result, stats) = tauri::async_runtime::spawn_blocking(move || {
-        let w = engine.stop_recording().map_err(|e| e.to_string())?;
-        Ok::<_, String>((w, engine.stats()))
+    let (result, game_folder, stats) = tauri::async_runtime::spawn_blocking(move || {
+        let (w, sub) = engine.stop_recording().map_err(|e| e.to_string())?;
+        Ok::<_, String>((w, sub, engine.stats()))
     })
     .await
     .map_err(|e| format!("recording stop panicked: {e}"))??;
@@ -207,10 +209,82 @@ pub fn sanitize_file_stem(raw: &str, fallback: &str) -> String {
         .collect();
     let trimmed = cleaned.trim().trim_matches('.');
     if trimmed.is_empty() {
-        fallback.to_string()
+        return fallback.to_string();
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    let base = upper.split('.').next().unwrap_or("");
+    let reserved = matches!(
+        base,
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    if reserved {
+        format!("_{trimmed}")
     } else {
         trimmed.to_string()
     }
+}
+
+fn validate_output_dir(raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.contains("://") || trimmed.starts_with("\\\\") {
+        return Err("Invalid output folder path".into());
+    }
+    let p = PathBuf::from(trimmed);
+    if !p.is_absolute() || p.parent().is_none() {
+        return Err("Output folder cannot be a filesystem root".into());
+    }
+    let lower = trimmed.replace('/', "\\").to_ascii_lowercase();
+    if lower.starts_with("c:\\windows")
+        || lower.starts_with("c:\\program files")
+        || lower.starts_with("c:\\programdata")
+    {
+        return Err("Cannot store clips inside Windows system directories".into());
+    }
+    Ok(p)
+}
+
+fn validate_clip_path(output_dir: &Path, raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.contains("://") || trimmed.starts_with("\\\\") {
+        return Err("Invalid clip path".into());
+    }
+    let candidate = Path::new(trimmed);
+    let ext_ok = candidate
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("mp4"));
+    if !ext_ok {
+        return Err("Only MP4 files inside the output directory are accessible".into());
+    }
+    let canon_root = std::fs::canonicalize(output_dir)
+        .map_err(|e| format!("Output folder unavailable: {e}"))?;
+    let canon_target = std::fs::canonicalize(candidate)
+        .map_err(|_| "Clip file was not found".to_string())?;
+    if !canon_target.starts_with(&canon_root) {
+        return Err("Clip path must reside inside the configured output directory".into());
+    }
+    Ok(canon_target)
 }
 
 fn game_folder_name(exe: &str) -> Option<String> {
@@ -331,28 +405,34 @@ pub async fn get_recorded_clips(
     with_thumbnails: Option<bool>,
 ) -> Result<Vec<ClipMetadata>, String> {
     let dir = state.output_dir();
-    let thumbs = with_thumbnails.unwrap_or(true);
+    let thumbs = with_thumbnails.unwrap_or(false);
     let mut clips = tauri::async_runtime::spawn_blocking(move || {
         library::scan_directory(&dir, thumbs).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("scan task panicked: {e}"))??;
-    state.clip_meta.lock().merge_into(&mut clips);
+    let dir = state.output_dir();
+    state.clip_meta.lock().merge_into(&dir, &mut clips);
     Ok(clips)
 }
 
 #[tauri::command]
-pub async fn get_clip_thumbnail(path: String, at_seconds: Option<f32>) -> Result<String, String> {
+pub async fn get_clip_thumbnail(
+    state: State<'_, AppState>,
+    path: String,
+    at_seconds: Option<f32>,
+) -> Result<String, String> {
+    let dir = state.output_dir();
     tauri::async_runtime::spawn_blocking(move || {
-        library::extract_thumbnail(Path::new(&path), at_seconds.unwrap_or(1.0))
-            .map_err(|e| e.to_string())
+        let safe = validate_clip_path(&dir, &path)?;
+        library::extract_thumbnail(&safe, at_seconds.unwrap_or(1.0)).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("thumbnail task panicked: {e}"))?
 }
 
 fn split_at_seconds(duration_seconds: f32, at_seconds: f32) -> Result<f32, String> {
-    if duration_seconds <= 0.4 {
+    if !duration_seconds.is_finite() || !at_seconds.is_finite() || duration_seconds <= 0.4 {
         return Err("clip is too short to split".to_string());
     }
     Ok(at_seconds.clamp(0.2, duration_seconds - 0.2))
@@ -366,12 +446,14 @@ pub struct SplitResult {
 }
 
 #[tauri::command]
-pub async fn split_clip(source_path: String, at_seconds: f32) -> Result<SplitResult, String> {
+pub async fn split_clip(
+    state: State<'_, AppState>,
+    source_path: String,
+    at_seconds: f32,
+) -> Result<SplitResult, String> {
+    let dir = state.output_dir();
     tauri::async_runtime::spawn_blocking(move || {
-        let source = PathBuf::from(&source_path);
-        if !source.exists() {
-            return Err(format!("source clip not found: {source_path}"));
-        }
+        let source = validate_clip_path(&dir, &source_path)?;
         let duration = library::probe(&source)
             .map_err(|e| e.to_string())?
             .duration_seconds;
@@ -384,8 +466,6 @@ pub async fn split_clip(source_path: String, at_seconds: f32) -> Result<SplitRes
             at,
         )
         .map_err(|e| e.to_string())?;
-
-        std::thread::sleep(std::time::Duration::from_millis(40));
 
         let dest_b = library::suggested_trim_path(&source);
         let part_b = match library::trim_stream_copy(&source, &dest_b, at, duration) {
@@ -405,16 +485,25 @@ pub async fn split_clip(source_path: String, at_seconds: f32) -> Result<SplitRes
 
 #[tauri::command]
 pub async fn trim_clip(
+    state: State<'_, AppState>,
     source_path: String,
     start_time: f32,
     end_time: f32,
     overwrite: Option<bool>,
 ) -> Result<TrimResult, String> {
+    if !start_time.is_finite() || !end_time.is_finite() {
+        return Err("invalid trim range".into());
+    }
+    let dir = state.output_dir();
     tauri::async_runtime::spawn_blocking(move || {
-        let source = PathBuf::from(&source_path);
+        let source = validate_clip_path(&dir, &source_path)?;
         let overwrite = overwrite.unwrap_or(false);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
         let dest = if overwrite {
-            source.with_extension("trim.tmp.mp4")
+            source.with_extension(format!("trim.{}.{stamp}.tmp.mp4", std::process::id()))
         } else {
             library::suggested_trim_path(&source)
         };
@@ -440,9 +529,11 @@ pub async fn trim_clip(
 }
 
 #[tauri::command]
-pub async fn delete_clip(path: String) -> Result<(), String> {
+pub async fn delete_clip(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let dir = state.output_dir();
     tauri::async_runtime::spawn_blocking(move || {
-        library::delete_clip(Path::new(&path)).map_err(|e| e.to_string())
+        let safe = validate_clip_path(&dir, &path)?;
+        library::delete_clip(&safe).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("delete task panicked: {e}"))?
@@ -471,8 +562,10 @@ pub async fn rename_clip(
     path: String,
     new_name: String,
 ) -> Result<String, String> {
-    let src = PathBuf::from(&path);
+    let dir = state.output_dir();
+    let orig_path = path.clone();
     let dest = tauri::async_runtime::spawn_blocking(move || -> Result<PathBuf, String> {
+        let src = validate_clip_path(&dir, &orig_path)?;
         let stem = sanitize_file_stem(&new_name, "");
         if stem.is_empty() {
             return Err("clip name cannot be empty".into());
@@ -486,37 +579,52 @@ pub async fn rename_clip(
             .parent()
             .ok_or_else(|| "clip has no parent directory".to_string())?
             .join(name);
+        if dest != src && dest.exists() {
+            return Err("A clip with that name already exists".into());
+        }
         std::fs::rename(&src, &dest).map_err(|e| e.to_string())?;
         Ok(dest)
     })
     .await
     .map_err(|e| format!("rename task panicked: {e}"))??;
 
+    let src_canon = validate_clip_path(&state.output_dir(), &dest.to_string_lossy()).unwrap_or(dest);
     state
         .clip_meta
         .lock()
-        .migrate(&path, &dest.to_string_lossy());
-    Ok(dest.to_string_lossy().to_string())
+        .migrate(&path, &src_canon.to_string_lossy());
+    Ok(src_canon.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub fn copy_clip_to_clipboard(path: String) -> Result<(), String> {
-    clipboard::copy_files(&[PathBuf::from(path)])
+pub fn copy_clip_to_clipboard(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let safe = validate_clip_path(&state.output_dir(), &path)?;
+    clipboard::copy_files(&[safe])
 }
 
 #[tauri::command]
-pub fn copy_clips_to_clipboard(paths: Vec<String>) -> Result<(), String> {
-    let clips: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+pub fn copy_clips_to_clipboard(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let dir = state.output_dir();
+    let mut clips = Vec::with_capacity(paths.len());
+    for p in &paths {
+        clips.push(validate_clip_path(&dir, p)?);
+    }
     clipboard::copy_files(&clips)
 }
 
 #[tauri::command]
-pub async fn delete_clips(paths: Vec<String>) -> Result<u32, String> {
+pub async fn delete_clips(state: State<'_, AppState>, paths: Vec<String>) -> Result<u32, String> {
+    let dir = state.output_dir();
     tauri::async_runtime::spawn_blocking(move || {
         let mut deleted = 0u32;
         for p in &paths {
-            if library::delete_clip(Path::new(p)).is_ok() {
-                deleted += 1;
+            if let Ok(safe) = validate_clip_path(&dir, p) {
+                if library::delete_clip(&safe).is_ok() {
+                    deleted += 1;
+                }
             }
         }
         Ok(deleted)
@@ -553,10 +661,15 @@ pub fn remove_clips_tag(
 }
 
 #[tauri::command]
-pub fn reveal_clip_in_folder(app: AppHandle, path: String) -> Result<(), String> {
+pub fn reveal_clip_in_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
+    let safe = validate_clip_path(&state.output_dir(), &path)?;
     app.opener()
-        .reveal_item_in_dir(&path)
+        .reveal_item_in_dir(safe)
         .map_err(|e| e.to_string())
 }
 
@@ -571,22 +684,30 @@ pub fn open_output_folder(app: AppHandle, state: State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
-pub fn open_clip_external(app: AppHandle, path: String) -> Result<(), String> {
+pub fn open_clip_external(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
+    let safe = validate_clip_path(&state.output_dir(), &path)?;
     app.opener()
-        .open_path(path, None::<&str>)
+        .open_path(safe.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn extract_png_frame(
+    state: State<'_, AppState>,
     path: String,
     at_seconds: Option<f32>,
     max_width: Option<u32>,
 ) -> Result<String, String> {
+    let dir = state.output_dir();
     tauri::async_runtime::spawn_blocking(move || {
+        let safe = validate_clip_path(&dir, &path)?;
         library::extract_frame_png(
-            Path::new(&path),
+            &safe,
             at_seconds.unwrap_or(0.0),
             max_width.unwrap_or(0),
         )
@@ -605,10 +726,17 @@ pub async fn save_png_snapshot(
     let dir = state.output_dir();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         use base64::Engine;
+        const MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
         let raw = png_base64.trim_start_matches("data:image/png;base64,");
+        if raw.len() > MAX_SNAPSHOT_BYTES * 4 / 3 + 16 {
+            return Err("snapshot exceeds 32 MB size limit".into());
+        }
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(raw)
             .map_err(|e| format!("invalid png data: {e}"))?;
+        if bytes.len() > MAX_SNAPSHOT_BYTES {
+            return Err("snapshot exceeds 32 MB size limit".into());
+        }
         if bytes.len() < 8 || bytes[..8] != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
             return Err("payload is not a PNG image".into());
         }
@@ -634,6 +762,14 @@ pub async fn save_png_snapshot(
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     Ok(state.settings.read().clone())
+}
+
+fn deserialize_double_opt<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -664,7 +800,8 @@ pub struct SettingsPatch {
     pub privacy_pause_when_unfocused: Option<bool>,
     pub game_volume: Option<u32>,
     pub mic_volume: Option<u32>,
-    pub mic_device_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_double_opt")]
+    pub mic_device_id: Option<Option<String>>,
     pub adaptive_eco: Option<bool>,
     pub eco_battery_threshold_pct: Option<u32>,
     pub eco_ram_free_gbs: Option<u32>,
@@ -727,8 +864,9 @@ pub fn update_settings(
         s.capture_microphone = v;
     }
     if let Some(v) = patch.output_dir.clone() {
-        std::fs::create_dir_all(&v).map_err(|e| e.to_string())?;
-        s.output_dir = v;
+        let dir_path = validate_output_dir(&v)?;
+        std::fs::create_dir_all(&dir_path).map_err(|e| e.to_string())?;
+        s.output_dir = dir_path.to_string_lossy().to_string();
     }
     if let Some(v) = patch.open_trimmer_after_save {
         s.open_trimmer_after_save = v;
@@ -769,12 +907,8 @@ pub fn update_settings(
     if let Some(v) = patch.mic_volume {
         s.mic_volume = v.clamp(0, 100);
     }
-    if let Some(v) = patch.mic_device_id.clone() {
-        s.mic_device_id = if v.trim().is_empty() || v == "default" {
-            None
-        } else {
-            Some(v)
-        };
+    if let Some(opt_v) = patch.mic_device_id.clone() {
+        s.mic_device_id = opt_v.filter(|v| !(v.trim().is_empty() || v == "default"));
     }
     if let Some(v) = patch.adaptive_eco {
         s.adaptive_eco = v;
@@ -786,34 +920,60 @@ pub fn update_settings(
         s.eco_ram_free_gbs = v.clamp(1, 32);
     }
 
-    // Rebind hotkeys with rollback tracking so a failure on any subsequent step
-    // (autostart registry or settings.json write) restores OS shortcuts cleanly.
-    let mut rebound: Vec<(String, String)> = Vec::new();
+    // Rebind changed hotkeys swap-safely (unregister changed old combos first,
+    // register new ones, and restore originals if anything fails).
+    let mut hk_changes: Vec<(String, String)> = Vec::new();
     if let Some(v) = patch.hotkey_save.clone() {
-        crate::hotkeys::rebind(&app, &s.hotkey_save, &v)?;
-        rebound.push((s.hotkey_save.clone(), v.clone()));
+        crate::hotkeys::validate(&v)?;
+        if !crate::hotkeys::combos_equal(&prev.hotkey_save, &v) {
+            hk_changes.push((prev.hotkey_save.clone(), v.clone()));
+        }
         s.hotkey_save = v;
     }
     if let Some(v) = patch.hotkey_toggle.clone() {
-        if let Err(e) = crate::hotkeys::rebind(&app, &s.hotkey_toggle, &v) {
-            for (old, new) in rebound.into_iter().rev() {
-                let _ = crate::hotkeys::rebind(&app, &new, &old);
-            }
-            return Err(e);
+        crate::hotkeys::validate(&v)?;
+        if !crate::hotkeys::combos_equal(&prev.hotkey_toggle, &v) {
+            hk_changes.push((prev.hotkey_toggle.clone(), v.clone()));
         }
-        rebound.push((s.hotkey_toggle.clone(), v.clone()));
         s.hotkey_toggle = v;
     }
     if let Some(v) = patch.hotkey_record.clone() {
-        if let Err(e) = crate::hotkeys::rebind(&app, &s.hotkey_record, &v) {
-            for (old, new) in rebound.into_iter().rev() {
-                let _ = crate::hotkeys::rebind(&app, &new, &old);
-            }
-            return Err(e);
+        crate::hotkeys::validate(&v)?;
+        if !crate::hotkeys::combos_equal(&prev.hotkey_record, &v) {
+            hk_changes.push((prev.hotkey_record.clone(), v.clone()));
         }
-        rebound.push((s.hotkey_record.clone(), v.clone()));
         s.hotkey_record = v;
     }
+
+    if !hk_changes.is_empty() {
+        for (old, _) in &hk_changes {
+            crate::hotkeys::unregister_combo(&app, old);
+        }
+        let mut applied_new: Vec<&str> = Vec::new();
+        for (_, new) in &hk_changes {
+            if let Err(e) = crate::hotkeys::register_combo(&app, new) {
+                for registered in applied_new {
+                    crate::hotkeys::unregister_combo(&app, registered);
+                }
+                for (old, _) in &hk_changes {
+                    let _ = crate::hotkeys::register_combo(&app, old);
+                }
+                return Err(e);
+            }
+            applied_new.push(new);
+        }
+    }
+
+    let restore_hotkeys = || {
+        if !hk_changes.is_empty() {
+            for (_, new) in &hk_changes {
+                crate::hotkeys::unregister_combo(&app, new);
+            }
+            for (old, _) in &hk_changes {
+                let _ = crate::hotkeys::register_combo(&app, old);
+            }
+        }
+    };
 
     if let Some(v) = patch.launch_at_startup {
         s.launch_at_startup = v;
@@ -824,18 +984,32 @@ pub fn update_settings(
             app.autolaunch().disable()
         };
         if let Err(e) = res {
-            for (old, new) in rebound.into_iter().rev() {
-                let _ = crate::hotkeys::rebind(&app, &new, &old);
-            }
+            restore_hotkeys();
             return Err(format!("could not update launch at startup: {e}"));
         }
     }
 
+    {
+        let current = state.settings.read();
+        s.profiles = current.profiles.clone();
+        s.profile_map = current.profile_map.clone();
+    }
+
     if let Err(e) = s.save() {
-        for (old, new) in rebound.into_iter().rev() {
-            let _ = crate::hotkeys::rebind(&app, &new, &old);
+        restore_hotkeys();
+        if patch.launch_at_startup.is_some() {
+            use tauri_plugin_autostart::ManagerExt;
+            let _ = if prev.launch_at_startup {
+                app.autolaunch().enable()
+            } else {
+                app.autolaunch().disable()
+            };
         }
         return Err(e);
+    }
+
+    if !hk_changes.is_empty() {
+        crate::refresh_tray_labels(&app);
     }
 
     if patch.buffer_seconds.is_some() {
@@ -843,7 +1017,7 @@ pub fn update_settings(
     }
     if let Some(dir) = patch.output_dir {
         state.engine.set_output_dir(std::path::PathBuf::from(&dir));
-        crate::allow_asset_dir(&app, &dir);
+        crate::allow_asset_dir(&app, &s.output_dir);
     }
     if let Some(v) = patch.always_on_top {
         if let Some(w) = app.get_webview_window("main") {
@@ -857,8 +1031,14 @@ pub fn update_settings(
             state.engine.set_privacy_gate(false);
         }
     }
-    if patch.game_volume.is_some() || patch.mic_volume.is_some() {
-        state.engine.set_audio_volumes(s.game_volume, s.mic_volume);
+    if patch.game_volume.is_some()
+        || patch.mic_volume.is_some()
+        || patch.capture_system_audio.is_some()
+        || patch.capture_microphone.is_some()
+    {
+        let eff_game = if s.capture_system_audio { s.game_volume } else { 0 };
+        let eff_mic = if s.capture_microphone { s.mic_volume } else { 0 };
+        state.engine.set_audio_volumes(eff_game, eff_mic);
     }
     if patch.mic_device_id.is_some() {
         state.engine.set_mic_device(s.mic_device_id.clone());
@@ -908,12 +1088,22 @@ pub async fn cleanup_old_clips(state: State<'_, AppState>, days: u32) -> Result<
     let dir = state.output_dir();
     let days = days.max(1);
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+    let mut clips = tauri::async_runtime::spawn_blocking(move || {
+        library::scan_directory(&dir, false).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("cleanup scan panicked: {e}"))??;
+
+    let meta_dir = state.output_dir();
+    state.clip_meta.lock().merge_into(&meta_dir, &mut clips);
+
     tauri::async_runtime::spawn_blocking(move || {
-        let clips = library::scan_directory(&dir, false).map_err(|e| e.to_string())?;
         let mut deleted = 0u32;
         for c in &clips {
-            let created = chrono::DateTime::from_timestamp_millis(c.created_unix_ms);
-            if let Some(created) = created {
+            if c.favorite {
+                continue;
+            }
+            if let Some(created) = chrono::DateTime::from_timestamp_millis(c.created_unix_ms) {
                 if created < cutoff && library::delete_clip(Path::new(&c.path)).is_ok() {
                     deleted += 1;
                 }
@@ -942,7 +1132,7 @@ pub fn save_profile(
     state: State<'_, AppState>,
     profile: CaptureProfile,
 ) -> Result<Settings, String> {
-    let mut s = state.settings.write();
+    let mut s = state.settings.read().clone();
     let id = profile.id.trim().to_ascii_lowercase();
     if id.is_empty() {
         return Err("profile id cannot be empty".into());
@@ -964,7 +1154,8 @@ pub fn save_profile(
         s.profiles.push(profile);
     }
     s.save()?;
-    Ok(s.clone())
+    *state.settings.write() = s.clone();
+    Ok(s)
 }
 
 #[tauri::command]
@@ -972,7 +1163,7 @@ pub fn delete_profile(
     state: State<'_, AppState>,
     profile_id: String,
 ) -> Result<Settings, String> {
-    let mut s = state.settings.write();
+    let mut s = state.settings.read().clone();
     let before = s.profiles.len();
     s.profiles.retain(|p| p.id != profile_id);
     if s.profiles.len() == before {
@@ -980,7 +1171,8 @@ pub fn delete_profile(
     }
     s.profile_map.retain(|m| m.profile_id != profile_id);
     s.save()?;
-    Ok(s.clone())
+    *state.settings.write() = s.clone();
+    Ok(s)
 }
 
 #[tauri::command]
@@ -988,7 +1180,7 @@ pub fn set_profile_map(
     state: State<'_, AppState>,
     map: Vec<ProfileMapEntry>,
 ) -> Result<Settings, String> {
-    let mut s = state.settings.write();
+    let mut s = state.settings.read().clone();
     let mut seen = std::collections::HashSet::new();
     let cleaned: Vec<ProfileMapEntry> = map
         .into_iter()
@@ -1008,7 +1200,8 @@ pub fn set_profile_map(
         .collect();
     s.profile_map = cleaned;
     s.save()?;
-    Ok(s.clone())
+    *state.settings.write() = s.clone();
+    Ok(s)
 }
 
 #[tauri::command]
@@ -1016,15 +1209,16 @@ pub fn apply_profile(
     state: State<'_, AppState>,
     profile_id: String,
 ) -> Result<Settings, String> {
-    let mut s = state.settings.write();
+    let mut s = state.settings.read().clone();
     let profile = s
         .profile_by_id(&profile_id)
         .cloned()
         .ok_or_else(|| format!("profile '{profile_id}' not found"))?;
     s.apply_profile_values(&profile);
-    state.engine.set_buffer_seconds(s.buffer_seconds);
     s.save()?;
-    Ok(s.clone())
+    state.engine.set_buffer_seconds(s.buffer_seconds);
+    *state.settings.write() = s.clone();
+    Ok(s)
 }
 
 #[tauri::command]
@@ -1042,25 +1236,26 @@ pub async fn get_audio_input_devices() -> Result<Vec<crate::media::audio::AudioD
 }
 
 #[tauri::command]
-pub fn hide_main_window(app: AppHandle) -> Result<(), String> {
+pub fn hide_main_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();
     }
     let _ = app.emit(EVT_DECK_HIDDEN, ());
-    crate::trim_working_set();
+    if !state.engine.is_running() {
+        crate::trim_working_set();
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    state.engine.stop();
+    let engine = Arc::clone(&state.engine);
+    let _ = std::thread::Builder::new()
+        .name("kage-shutdown".into())
+        .spawn(move || engine.stop());
     app.exit(0);
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Clipboard (CF_HDROP)
-// ---------------------------------------------------------------------------
 
 mod clipboard {
     use std::path::PathBuf;
@@ -1075,6 +1270,10 @@ mod clipboard {
         use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
         use windows::Win32::System::Ole::CF_HDROP;
         use windows::Win32::UI::Shell::DROPFILES;
+
+        if paths.is_empty() {
+            return Err("no clips selected".into());
+        }
 
         for p in paths {
             if !p.exists() {
@@ -1138,8 +1337,17 @@ mod clipboard {
 }
 
 #[tauri::command]
-pub fn simulate_device_loss(state: State<'_, AppState>) {
-    state.engine.simulate_device_loss();
+pub fn simulate_device_loss(state: State<'_, AppState>) -> Result<(), String> {
+    #[cfg(any(debug_assertions, feature = "headless-sim"))]
+    {
+        state.engine.simulate_device_loss();
+        Ok(())
+    }
+    #[cfg(not(any(debug_assertions, feature = "headless-sim")))]
+    {
+        let _ = state;
+        Err("Device-loss simulation is disabled in release builds".into())
+    }
 }
 
 #[cfg(test)]

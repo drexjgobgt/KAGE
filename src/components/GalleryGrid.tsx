@@ -9,6 +9,7 @@ import {
   IconCheck,
   IconCopy,
   IconExternal,
+  IconFolder,
   IconPlay,
   IconSearch,
   IconStar,
@@ -158,189 +159,200 @@ const ClipCard = memo(function ClipCard({
 
   return (
     <article
-      role="button"
-      tabIndex={0}
-      aria-label={`${clip.title}, ${formatDuration(clip.duration_seconds)}${
-        clip.game ? `, ${clip.game}` : ""
-      }${clip.favorite ? ", favourite" : ""}`}
-      aria-pressed={selectMode ? selected : undefined}
-      onKeyDown={handleKeyDown}
-      onClick={handleClick}
       className={cn(
-        "group relative cursor-pointer overflow-hidden rounded-[12px] border transition-colors duration-150",
+        "group relative overflow-hidden rounded-[12px] border transition-colors duration-150",
         selected
           ? "border-[#E6C29F] ring-2 ring-[#E6C29F]/40 bg-[#1A1612]"
           : "border-[#282320] bg-[#12100E] hover:border-[#6E655E] hover:bg-[#161311]",
       )}
     >
-      {/* Thumbnail Viewport */}
-      <div className="relative aspect-video w-full overflow-hidden bg-[#0A0908]">
-        {thumb ? (
-          <img
-            src={thumb}
-            alt={clip.title}
-            loading="lazy"
-            decoding="async"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="absolute inset-0 grid place-items-center bg-[#14110F]">
-            <span className="font-mono text-[10px] tracking-[0.12em] text-[#94897E]">
-              PREVIEW READY
+      <button
+        type="button"
+        aria-label={`${clip.title}, ${formatDuration(clip.duration_seconds)}${
+          clip.game ? `, ${clip.game}` : ""
+        }${clip.favorite ? ", favorite" : ""}`}
+        aria-pressed={selectMode ? selected : undefined}
+        onKeyDown={handleKeyDown}
+        onClick={handleClick}
+        className="block w-full text-left focus:outline-none"
+      >
+        {/* Thumbnail Viewport */}
+        <div className="relative aspect-video w-full overflow-hidden bg-[#0A0908]">
+          {thumb ? (
+            <img
+              src={thumb}
+              alt={clip.title}
+              loading="lazy"
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="absolute inset-0 grid place-items-center bg-[#14110F]">
+              <span className="font-mono text-[10px] tracking-[0.12em] text-[#94897E]">
+                PREVIEW READY
+              </span>
+            </div>
+          )}
+
+          {/* Play indicator on hover */}
+          <span className="pointer-events-none absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            <span className="grid h-10 w-10 place-items-center rounded-full border border-[#E6C29F]/60 bg-[#0A0908]/90 text-[#E6C29F]">
+              <IconPlay className="ml-0.5 h-4 w-4" />
             </span>
-          </div>
-        )}
-
-        {/* Play indicator on hover */}
-        <span className="pointer-events-none absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-          <span className="grid h-10 w-10 place-items-center rounded-full border border-[#E6C29F]/60 bg-[#0A0908]/90 text-[#E6C29F]">
-            <IconPlay className="ml-0.5 h-4 w-4" />
           </span>
-        </span>
 
-        {/* Readability gradient scrim */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0A0908]/85 via-transparent to-[#0A0908]/30" />
+          {/* Readability gradient scrim */}
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0A0908]/85 via-transparent to-[#0A0908]/30" />
 
-        {/* Game badge */}
-        {clip.game && (
-          <span className="absolute left-2.5 top-2.5 rounded-[5px] border border-[#282320] bg-[#0A0908]/90 px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wide text-[#F3ECE4]">
-            {clip.game.toUpperCase()}
-          </span>
-        )}
-
-        {/* Duration badge */}
-        <span className="absolute bottom-2 left-2.5 rounded-[5px] border border-[#282320] bg-[#0A0908]/90 px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-[#F3ECE4]">
-          {formatDuration(clip.duration_seconds)}
-        </span>
-
-        {/* Audio indicator */}
-        {clip.has_audio && (
-          <span
-            className="absolute bottom-2 left-16 flex items-center gap-1 rounded-[5px] border border-[#282320] bg-[#0A0908]/90 px-1.5 py-0.5 font-mono text-[10px] text-[#B5AA9F]"
-            title="Includes audio track"
-          >
-            <IconVolume className="h-3 w-3" />
-            Audio
-          </span>
-        )}
-
-        {/* Resolution / FPS badge */}
-        <span className="absolute bottom-2 right-2.5 rounded-[5px] border border-[#282320] bg-[#0A0908]/90 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[#B5AA9F]">
-          {clip.height}p{clip.fps}
-        </span>
-
-        {/* Favorite indicator */}
-        {clip.favorite && (
-          <span
-            className="absolute left-2.5 top-8 grid h-5 w-5 place-items-center rounded-[5px] bg-[#E6C29F] text-[#0A0908]"
-            title="Favourited clip"
-          >
-            <IconStar filled className="h-3 w-3" />
-          </span>
-        )}
-
-        {/* Quick actions */}
-        <div
-          className={cn(
-            "absolute right-2 top-2 flex items-center gap-1 transition-opacity duration-150",
-            selectMode ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
-          )}
-        >
-          {(selectMode || selected) && (
-            <CardIconButton
-              title={selected ? "Deselect clip" : "Select clip"}
-              highlight={selected}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelect(clip, { ctrl: true, shift: false });
-              }}
-            >
-              {selected ? <IconCheck className="h-3.5 w-3.5" /> : <span className="h-2.5 w-2.5 rounded-xs border border-[#94897E]" />}
-            </CardIconButton>
-          )}
-
-          <CardIconButton
-            title={clip.favorite ? "Remove from favourites" : "Add to favourites"}
-            highlight={clip.favorite}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFavorite(clip);
-            }}
-          >
-            <IconStar filled={clip.favorite} className="h-3.5 w-3.5" />
-          </CardIconButton>
-
-          <CardIconButton
-            title="Open in external player"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenExternal(clip);
-            }}
-          >
-            <IconExternal className="h-3.5 w-3.5" />
-          </CardIconButton>
-
-          <CardIconButton
-            title="Copy video file to clipboard"
-            onClick={(e) => {
-              e.stopPropagation();
-              onCopy(clip);
-            }}
-          >
-            <IconCopy className="h-3.5 w-3.5" />
-          </CardIconButton>
-
-          <CardIconButton
-            title="Reveal in Explorer"
-            onClick={(e) => {
-              e.stopPropagation();
-              onReveal(clip);
-            }}
-          >
-            <IconSearch className="h-3.5 w-3.5" />
-          </CardIconButton>
-
-          <CardIconButton
-            title="Delete clip"
-            danger
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(clip);
-            }}
-          >
-            <IconTrash className="h-3.5 w-3.5" />
-          </CardIconButton>
-        </div>
-      </div>
-
-      {/* Metadata footer */}
-      <div className={compact ? "px-2.5 py-2" : "px-3 py-2.5"}>
-        <div className="h-5 truncate text-[13px] font-medium text-[#F3ECE4]">
-          {clip.title}
-        </div>
-        <div className="mt-1 flex h-4 items-center gap-1 overflow-hidden">
-          {clip.tags.length > 0 && (
-            <>
-              {clip.tags.slice(0, 3).map((t) => (
-                <span
-                  key={t}
-                  className="shrink-0 rounded-[5px] border border-[#282320] bg-[#1A1715] px-1.5 py-px font-mono text-[9px] text-[#B5AA9F]"
-                >
-                  #{t}
-                </span>
-              ))}
-              {clip.tags.length > 3 && (
-                <span className="shrink-0 font-mono text-[9px] text-[#94897E]">
-                  +{clip.tags.length - 3}
+          {/* Top-left game and favorite stack */}
+          {(clip.game || clip.favorite) && (
+            <div className="pointer-events-none absolute left-2.5 top-2.5 flex items-center gap-1.5">
+              {clip.game && (
+                <span className="rounded-[5px] border border-[#282320] bg-[#0A0908]/90 px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wide text-[#F3ECE4]">
+                  {clip.game.toUpperCase()}
                 </span>
               )}
-            </>
+              {clip.favorite && (
+                <span
+                  className="grid h-5 w-5 place-items-center rounded-[5px] bg-[#E6C29F] text-[#0A0908]"
+                  title="Favorited clip"
+                >
+                  <IconStar filled className="h-3 w-3" />
+                </span>
+              )}
+            </div>
           )}
+
+          {/* Bottom overlay badges */}
+          <div className="pointer-events-none absolute inset-x-2.5 bottom-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-[5px] border border-[#282320] bg-[#0A0908]/90 px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-[#F3ECE4]">
+                {formatDuration(clip.duration_seconds)}
+              </span>
+              {clip.has_audio && (
+                <span
+                  className="flex items-center gap-1 rounded-[5px] border border-[#282320] bg-[#0A0908]/90 px-1.5 py-0.5 font-mono text-[10px] text-[#B5AA9F]"
+                  title="Includes audio track"
+                >
+                  <IconVolume className="h-3 w-3" />
+                  Audio
+                </span>
+              )}
+            </div>
+            <span className="rounded-[5px] border border-[#282320] bg-[#0A0908]/90 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[#B5AA9F]">
+              {clip.height}p{clip.fps}
+            </span>
+          </div>
         </div>
-        <div className="mt-1.5 flex items-center justify-between font-mono text-[10px] tabular-nums text-[#94897E]">
-          <span>{formatRelativeTime(clip.created_unix_ms)}</span>
-          <span>{formatBytes(clip.size_bytes)}</span>
+
+        {/* Metadata footer */}
+        <div className={compact ? "px-2.5 py-2" : "px-3 py-2.5"}>
+          <div className="h-5 truncate text-[13px] font-medium text-[#F3ECE4]">
+            {clip.title}
+          </div>
+          <div className="mt-1 flex h-4 items-center gap-1 overflow-hidden">
+            {clip.tags.length > 0 && (
+              <>
+                {clip.tags.slice(0, 3).map((t) => (
+                  <span
+                    key={t}
+                    className="shrink-0 rounded-[5px] border border-[#282320] bg-[#1A1715] px-1.5 py-px font-mono text-[10px] text-[#B5AA9F]"
+                  >
+                    #{t}
+                  </span>
+                ))}
+                {clip.tags.length > 3 && (
+                  <span className="shrink-0 font-mono text-[10px] text-[#94897E]">
+                    +{clip.tags.length - 3}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+          <div className="mt-1.5 flex items-center justify-between font-mono text-[10px] tabular-nums text-[#94897E]">
+            <span>{formatRelativeTime(clip.created_unix_ms)}</span>
+            <span>{formatBytes(clip.size_bytes)}</span>
+          </div>
         </div>
+      </button>
+
+      {/* Sibling quick action overlay */}
+      <div
+        className={cn(
+          "absolute right-2 top-2 z-10 flex items-center gap-1 transition-opacity duration-150",
+          selectMode
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        )}
+      >
+        {(selectMode || selected) && (
+          <CardIconButton
+            title={selected ? "Deselect clip" : "Select clip"}
+            highlight={selected}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(clip, { ctrl: true, shift: false });
+            }}
+          >
+            {selected ? (
+              <IconCheck className="h-3.5 w-3.5" />
+            ) : (
+              <span className="h-2.5 w-2.5 rounded-xs border border-[#94897E]" />
+            )}
+          </CardIconButton>
+        )}
+
+        <CardIconButton
+          title={clip.favorite ? "Remove from favorites" : "Add to favorites"}
+          highlight={clip.favorite}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite(clip);
+          }}
+        >
+          <IconStar filled={clip.favorite} className="h-3.5 w-3.5" />
+        </CardIconButton>
+
+        <CardIconButton
+          title="Open in external player"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenExternal(clip);
+          }}
+        >
+          <IconExternal className="h-3.5 w-3.5" />
+        </CardIconButton>
+
+        <CardIconButton
+          title="Copy video file to clipboard"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCopy(clip);
+          }}
+        >
+          <IconCopy className="h-3.5 w-3.5" />
+        </CardIconButton>
+
+        <CardIconButton
+          title="Reveal in Explorer"
+          onClick={(e) => {
+            e.stopPropagation();
+            onReveal(clip);
+          }}
+        >
+          <IconFolder className="h-3.5 w-3.5" />
+        </CardIconButton>
+
+        <CardIconButton
+          title="Delete clip"
+          danger
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(clip);
+          }}
+        >
+          <IconTrash className="h-3.5 w-3.5" />
+        </CardIconButton>
       </div>
     </article>
   );
@@ -375,7 +387,8 @@ const GalleryGrid = memo(function GalleryGrid({
   let content: React.ReactNode;
   if (loading) {
     content = (
-      <div className={gridClass}>
+      <div role="status" aria-label="Loading clips" className={gridClass}>
+        <span className="sr-only">Loading clips...</span>
         {Array.from({ length: compact ? 8 : 6 }).map((_, i) => (
           <div
             key={i}

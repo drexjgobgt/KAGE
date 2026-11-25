@@ -39,9 +39,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            Some(vec!["--minimized"]),
         ))
-        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -99,6 +98,10 @@ pub fn run() {
                     .always_on_top;
                 if on_top {
                     let _ = w.set_always_on_top(true);
+                }
+                if std::env::args().any(|a| a == "--minimized") {
+                    let _ = w.hide();
+                    let _ = handle.emit(EVT_DECK_HIDDEN, ());
                 }
             }
 
@@ -172,16 +175,22 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                let minimize = window
-                    .app_handle()
-                    .try_state::<AppState>()
+                let state = window.app_handle().try_state::<AppState>();
+                let minimize = state
+                    .as_ref()
                     .map(|s| s.settings.read().minimize_to_tray)
                     .unwrap_or(true);
+                let capture_running = state
+                    .as_ref()
+                    .map(|s| s.engine.is_running())
+                    .unwrap_or(false);
                 if minimize && window.label() == "main" {
                     api.prevent_close();
                     let _ = window.hide();
                     let _ = window.app_handle().emit(EVT_DECK_HIDDEN, ());
-                    trim_working_set();
+                    if !capture_running {
+                        trim_working_set();
+                    }
                 }
             }
         })
@@ -237,7 +246,10 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Some(state) = app.try_state::<AppState>() {
-                    state.engine.stop();
+                    let engine = Arc::clone(&state.engine);
+                    let _ = std::thread::Builder::new()
+                        .name("kage-shutdown".into())
+                        .spawn(move || engine.stop());
                 }
             }
         });
@@ -253,7 +265,7 @@ fn allow_asset_dir(app: &tauri::AppHandle, dir: &str) {
     }
 }
 
-/// Asks Windows to page out cold working-set pages when KAGE hides to the tray.
+/// Asks Windows to page out cold working-set pages only when capture is idle.
 pub fn trim_working_set() {
     #[cfg(all(windows, not(feature = "headless-sim")))]
     unsafe {
@@ -270,20 +282,47 @@ pub fn trim_working_set() {
     }
 }
 
-fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let save = MenuItem::with_id(app, "save", "Save Replay\tAlt+C", true, None::<&str>)?;
+pub fn refresh_tray_labels(app: &tauri::AppHandle) {
+    if let Some(tray) = app.tray_by_id("kage-tray") {
+        let (save_k, rec_k, tog_k) = app
+            .try_state::<AppState>()
+            .map(|st| {
+                let s = st.settings.read();
+                (
+                    s.hotkey_save.clone(),
+                    s.hotkey_record.clone(),
+                    s.hotkey_toggle.clone(),
+                )
+            })
+            .unwrap_or_else(|| ("Alt+C".into(), "Alt+R".into(), "Alt+Shift+C".into()));
+        let _ = tray.set_tooltip(Some(&format!(
+            "KAGE Studio ({save_k} replay, {rec_k} record)"
+        )));
+        if let Ok(menu) = build_tray_menu(app, &save_k, &rec_k, &tog_k) {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+}
+
+fn build_tray_menu(
+    app: &tauri::AppHandle,
+    save_k: &str,
+    rec_k: &str,
+    tog_k: &str,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let save = MenuItem::with_id(app, "save", format!("Save Replay\t{save_k}"), true, None::<&str>)?;
     let last30 = MenuItem::with_id(app, "save30", "Save Last 30s", true, None::<&str>)?;
     let record = MenuItem::with_id(
         app,
         "record",
-        "Start / Stop Recording\tAlt+R",
+        format!("Start / Stop Recording\t{rec_k}"),
         true,
         None::<&str>,
     )?;
     let toggle = MenuItem::with_id(
         app,
         "toggle",
-        "Arm / Disarm Buffer\tAlt+Shift+C",
+        format!("Arm / Disarm Buffer\t{tog_k}"),
         true,
         None::<&str>,
     )?;
@@ -299,11 +338,26 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         &[&save, &last30, &record, &toggle],
     )?;
-    let menu = Menu::with_items(app, &[&capture, &sep, &show, &folder, &sep, &quit])?;
+    Menu::with_items(app, &[&capture, &sep, &show, &folder, &sep, &quit])
+}
+
+fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let (save_k, rec_k, tog_k) = app
+        .try_state::<AppState>()
+        .map(|st| {
+            let s = st.settings.read();
+            (
+                s.hotkey_save.clone(),
+                s.hotkey_record.clone(),
+                s.hotkey_toggle.clone(),
+            )
+        })
+        .unwrap_or_else(|| ("Alt+C".into(), "Alt+R".into(), "Alt+Shift+C".into()));
+    let menu = build_tray_menu(app, &save_k, &rec_k, &tog_k)?;
 
     let mut builder = TrayIconBuilder::with_id("kage-tray")
         .menu(&menu)
-        .tooltip("KAGE Studio (Alt+C replay, Alt+R record)")
+        .tooltip(format!("KAGE Studio ({save_k} replay, {rec_k} record)"))
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "save" => hotkeys::trigger_save(app.clone()),
@@ -365,9 +419,6 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 }
             }
             "quit" => {
-                if let Some(state) = app.try_state::<AppState>() {
-                    state.engine.stop();
-                }
                 app.exit(0);
             }
             _ => {}

@@ -19,7 +19,9 @@ export function TransportBar({
   onToggleRecord,
   onToggleBuffer,
 }: TransportBarProps) {
-  const armed = stats.state === "buffering" || stats.state === "flushing";
+  const armed =
+    (stats.state === "buffering" || stats.state === "flushing") &&
+    stats.ring_enabled;
   const recording = stats.recording_active;
   const fillPct =
     stats.buffer_seconds > 0
@@ -41,7 +43,11 @@ export function TransportBar({
                     : "bg-[#94897E]"
               }`}
             />
-            {recording ? (
+            {recording && !stats.ring_enabled ? (
+              <span className="text-[#FF6B6F] tabular-nums">
+                Direct REC {formatDuration(stats.recording_seconds)} (0 Ring RAM)
+              </span>
+            ) : recording ? (
               <span className="text-[#FF6B6F] tabular-nums">
                 REC {formatDuration(stats.recording_seconds)} ({formatBytes(stats.recording_bytes)})
               </span>

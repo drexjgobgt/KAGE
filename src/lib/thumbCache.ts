@@ -20,6 +20,10 @@ export function cacheThumbnail(path: string, data: string): void {
   }
 }
 
+export function deleteCachedThumbnail(path: string): void {
+  cache.delete(path);
+}
+
 export function clearThumbnailCache(): void {
   cache.clear();
 }

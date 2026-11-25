@@ -6,15 +6,20 @@ All notable changes to **KAGE Studio** (formerly ClipFlow) are documented here. 
 
 ### Added
 
-- **Rebranded to KAGE (`KAGE Studio`)**: New geometric diagonal shutter "K" monogram, warm-obsidian editorial-tactical palette (`#0A0908` canvas, `#12100E` surface, `#E6C29F` champagne CTA, `#C92A32` tactical crimson trigger), bundled `Instrument Serif` display font, and Double-Bezel modular interface designed in FigCraft (`design/kage-ui.figcraft`).
+- **Rebranded to KAGE (`KAGE Studio`)**: New geometric diagonal shutter "K" monogram, warm-obsidian editorial-tactical palette (`#0A0908` canvas, `#12100E` surface, `#E6C29F` champagne CTA, `#C92A32` tactical crimson trigger), bundled `Instrument Serif` display font, Three-Stage Signal Flow Telemetry, and Double-Bezel modular interface (`design/build_figcraft.mjs`).
 - **Direct MP4 Recording (`Alt + R`)**: Toggle start/stop continuous MP4 streaming straight to disk with zero replay ring memory overhead when disarmed, or share the active GPU hardware encoder when the replay buffer is armed.
 - **Disk-cached JPEG thumbnails & live disk telemetry**: `library.rs` caches JPEG thumbnails under `%APPDATA%\KAGE\thumbs\` with automatic pruning, and `get_disk_free_bytes` exposes live output volume capacity.
 
 ### Fixed
 
+- **Pre-release security, COM, and data-integrity audit fixes**:
+  - Enforced canonical `.mp4` path scoping inside `output_dir` across all clip IPC commands and trimmed unused Tauri capabilities/dependencies (`tauri-plugin-process`).
+  - Added `font-src 'self' data:` to CSP so WebView2 renders bundled `InstrumentSerif` fonts, fixed Windows file-handle locking before Overwrite/Rename/Delete in `ClipTrimmerModal`, and resolved native video preview URLs via `assetUrl()`.
+  - Added `CaptureEngine` lifecycle serialization lock, 4-texture `ColorConverter` NV12 pool, `CODECAPI_AVEncVideoForceKeyFrame` + software H.264 MFT fallback, time-interleaved MP4 muxing, continuous WASAPI linear resampler interpolation with 24/32-bit PCM support, DXGI monitor refresh-rate detection, and atomic temp-file writes (`settings.rs`, `clipmeta.rs`, `library.rs`).
+  - Eliminated double replay-save counting in `App.tsx`, fixed `EcoHysteresis` and `autosaveOnGameExit` focus guards, fixed Shift-hotkey code capture, and met WCAG AA/1.4.11 keyboard accessibility across `GalleryGrid` and `ClipTrimmerModal`.
 - **COM / Media Foundation sample leaks (Issue #1)**: Released `ManuallyDrop::take` COM interfaces (`IMFSample`, `IMFCollection`) on every `ProcessOutput` path in `audio.rs`, preallocated reusable AAC encoder sample/buffer state, drained MFT events non-blockingly in `recorder.rs`, and fixed DXGI `AcquireNextFrame` frame release semantics and `MFTEnumEx` `IMFActivate` cleanup.
 - **Memory & tray footprint**: Called `SetProcessWorkingSetSizeEx` on tray hide, cleared UI thumbnail cache on `kage://deck-hidden`, freed `HGLOBAL` on clipboard error paths, and removed background updater and devtools defaults so idle RAM stays minimal with zero outbound requests.
-- **Range sliders & UI polish**: Fixed audio volume scale (`0-100%`), vertically centered slider thumbs on filled tracks, added tactile segmented FPS pills, and prevented modal trimmer action clipping.
+- **Range sliders & UI polish**: Fixed audio volume scale (`0-100%`), vertically centered slider thumbs on filled tracks, added tactile segmented FPS pills aligned with encoder dropdowns, and prevented modal trimmer action clipping.
 
 ## [1.6.0] - unreleased
 

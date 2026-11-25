@@ -29,7 +29,6 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2.0.4"
 tauri-plugin-notification = "2.0.1"
 tauri-plugin-autostart = "2"
-tauri-plugin-process = "2"
 
 # ---------------------------------------------------------- Serialization/IO
 serde = { version = "1.0.215", features = ["derive"] }

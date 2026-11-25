@@ -20,18 +20,46 @@ pub fn parse(accelerator: &str) -> Result<Shortcut, String> {
 
 pub fn validate(accelerator: &str) -> Result<Shortcut, String> {
     let sc = parse(accelerator)?;
-    let lower = accelerator.to_ascii_lowercase();
-    let has_modifier = [
-        "alt", "ctrl", "control", "shift", "super", "win", "cmd", "meta", "option", "command",
-    ]
-    .iter()
-    .any(|m| lower.contains(m));
+    let has_modifier = accelerator.split('+').any(|part| {
+        matches!(
+            part.trim().to_ascii_lowercase().as_str(),
+            "alt"
+                | "ctrl"
+                | "control"
+                | "shift"
+                | "super"
+                | "win"
+                | "cmd"
+                | "meta"
+                | "option"
+                | "command"
+        )
+    });
     if !has_modifier {
         return Err(format!(
             "'{accelerator}' needs a modifier (Alt, Ctrl, Shift or Win): Windows reserves bare keys for typing"
         ));
     }
     Ok(sc)
+}
+
+pub fn unregister_combo(app: &AppHandle, accelerator: &str) {
+    if let Ok(sc) = parse(accelerator) {
+        let gs = app.global_shortcut();
+        if gs.is_registered(sc) {
+            let _ = gs.unregister(sc);
+        }
+    }
+}
+
+pub fn register_combo(app: &AppHandle, accelerator: &str) -> Result<(), String> {
+    let sc = validate(accelerator)?;
+    let gs = app.global_shortcut();
+    if gs.is_registered(sc) {
+        return Ok(());
+    }
+    gs.register(sc)
+        .map_err(|e| format!("could not register {accelerator}: {e}"))
 }
 
 /// Checks if two accelerator strings resolve to the same OS shortcut.
@@ -195,20 +223,26 @@ pub fn trigger_save(app: AppHandle) {
             return;
         };
 
+        let (toggle_key, open_trimmer, privacy_enabled) = {
+            let s = state.settings.read();
+            (
+                s.hotkey_toggle.clone(),
+                s.open_trimmer_after_save,
+                s.privacy_pause_when_unfocused,
+            )
+        };
+
         let engine = Arc::clone(&state.engine);
         if !engine.is_running() || !engine.is_ring_enabled() {
             let _ = app.emit(
                 EVT_ERROR,
-                "Replay buffer is not armed. Press Arm Buffer (or Alt+Shift+C) first.",
+                format!("Replay buffer is not armed. Press Arm Buffer (or {toggle_key}) first."),
             );
             return;
         }
 
-        let open_trimmer = state.settings.read().open_trimmer_after_save;
         let game_folder = crate::commands::resolve_game_folder(&state, None);
         state.engine.set_output_subfolder(game_folder.clone());
-
-        let privacy_enabled = state.settings.read().privacy_pause_when_unfocused;
         let result = tauri::async_runtime::spawn_blocking(move || {
             let focused = crate::foreground::get_foreground_game();
             let focused_err = focused.clone();
@@ -246,7 +280,7 @@ pub fn trigger_save(app: AppHandle) {
                     focused_exe.starts_with("kage") || focused_exe.starts_with("explorer");
                 let raise_deck = open_trimmer && safe_to_raise;
 
-                if open_trimmer && !safe_to_raise {
+                if !safe_to_raise {
                     use tauri_plugin_notification::NotificationExt;
                     let _ = app
                         .notification()
@@ -288,7 +322,7 @@ pub fn trigger_record_toggle(app: AppHandle) {
             .await;
 
             match res {
-                Ok(Ok((write, focused, stats))) => {
+                Ok(Ok(((write, game_folder), focused, stats))) => {
                     let _ = app.emit(EVT_RECORDING_STATE, &stats);
                     let _ = app.emit(EVT_BUFFER_STATE, &stats);
 
@@ -310,7 +344,6 @@ pub fn trigger_record_toggle(app: AppHandle) {
                             .show();
                     }
 
-                    let game_folder = crate::commands::resolve_game_folder(&state, None);
                     publish_saved_clip(&app, &write, game_folder, "record-hotkey", false, false);
                 }
                 Ok(Err(e)) => {
@@ -323,11 +356,18 @@ pub fn trigger_record_toggle(app: AppHandle) {
                 }
             }
         } else {
-            let cfg = {
+            if let Some(msg) = crate::commands::privacy_blocked_message(&state, None) {
+                let _ = app.emit(EVT_ERROR, msg);
+                return;
+            }
+            let (cfg, record_key) = {
                 let s = state.settings.read();
-                s.active_profile()
-                    .map(|p| s.to_profile_config(p))
-                    .unwrap_or_else(|| s.to_recorder_config())
+                (
+                    s.active_profile()
+                        .map(|p| s.to_profile_config(p))
+                        .unwrap_or_else(|| s.to_recorder_config()),
+                    s.hotkey_record.clone(),
+                )
             };
             let game_folder = crate::commands::resolve_game_folder(&state, None);
             let res = tauri::async_runtime::spawn_blocking(move || {
@@ -352,7 +392,7 @@ pub fn trigger_record_toggle(app: AppHandle) {
                             .notification()
                             .builder()
                             .title("KAGE Recording Started")
-                            .body("Press Alt+R again to stop and save MP4.")
+                            .body(format!("Press {record_key} again to stop and save MP4."))
                             .show();
                     }
                 }
@@ -373,7 +413,12 @@ pub fn trigger_toggle(app: AppHandle) {
             return;
         };
         let engine = Arc::clone(&state.engine);
-        let cfg = state.settings.read().to_recorder_config();
+        let cfg = {
+            let s = state.settings.read();
+            s.active_profile()
+                .map(|p| s.to_profile_config(p))
+                .unwrap_or_else(|| s.to_recorder_config())
+        };
 
         let stats = tauri::async_runtime::spawn_blocking(move || {
             if engine.is_running() && engine.is_ring_enabled() {

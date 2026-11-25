@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { shouldGateForForeground } from "../lib/privacyGate";
 import type {
   AppSettings,
   CaptureProfile,
@@ -47,6 +48,10 @@ export function ProfilesView({
   const [mapProfileId, setMapProfileId] = useState(
     settings.profiles[0]?.id ?? "default",
   );
+  const [mapError, setMapError] = useState<string | null>(null);
+  const effectiveMapProfileId = settings.profiles.some((p) => p.id === mapProfileId)
+    ? mapProfileId
+    : (settings.profiles[0]?.id ?? "default");
 
   const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,6 +73,11 @@ export function ProfilesView({
   const handleAddMapping = (exeName: string, profileId: string) => {
     const clean = exeName.trim().toLowerCase();
     if (!clean) return;
+    if (shouldGateForForeground(clean)) {
+      setMapError("System desktop and KAGE executables cannot be mapped as game targets.");
+      return;
+    }
+    setMapError(null);
     const next = [
       ...settings.profileMap.filter((m) => m.exeName.toLowerCase() !== clean),
       { exeName: clean, profileId },
@@ -125,10 +135,10 @@ export function ProfilesView({
           </div>
 
           <div className="flex items-center gap-2">
-            {foreground?.exe && (
+            {foreground?.exe && !shouldGateForForeground(foreground.exe) && (
               <button
                 type="button"
-                onClick={() => handleAddMapping(foreground.exe, mapProfileId)}
+                onClick={() => handleAddMapping(foreground.exe, effectiveMapProfileId)}
                 className="rounded-full bg-[#E6C29F] px-3.5 py-1.5 text-xs font-semibold text-[#0A0908] hover:bg-[#F0D2B4]"
               >
                 Map to Selected Profile
@@ -174,7 +184,7 @@ export function ProfilesView({
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="Competitive 120Hz"
-                  className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                  className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
                 />
               </label>
 
@@ -189,7 +199,7 @@ export function ProfilesView({
                   onChange={(e) =>
                     setForm({ ...form, bufferSeconds: Number(e.target.value) })
                   }
-                  className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 font-mono text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                  className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 font-mono text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
                 />
               </label>
 
@@ -200,7 +210,7 @@ export function ProfilesView({
                   onChange={(e) =>
                     setForm({ ...form, targetFps: Number(e.target.value) })
                   }
-                  className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 font-mono text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                  className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 font-mono text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
                 >
                   <option value={30}>30</option>
                   <option value={60}>60</option>
@@ -222,7 +232,7 @@ export function ProfilesView({
                       bitrateKbps: Number(e.target.value) * 1000,
                     })
                   }
-                  className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 font-mono text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                  className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 font-mono text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
                 />
               </label>
 
@@ -236,7 +246,7 @@ export function ProfilesView({
                     })
                   }
                   aria-label="Profile codec"
-                  className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-2.5 py-1.5 font-mono text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+                  className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-2.5 py-1.5 font-mono text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
                 >
                   <option value="h264">H.264</option>
                   <option value="hevc">HEVC</option>
@@ -300,7 +310,7 @@ export function ProfilesView({
                           setForm(p);
                           setEditing(true);
                         }}
-                        className="rounded-[6px] border border-[#282320] bg-[#1A1715] px-2.5 py-1 text-xs text-[#B5AA9F] hover:text-[#F3ECE4]"
+                        className="rounded-[6px] border border-[#6E655E] bg-[#1A1715] px-2.5 py-1 text-xs text-[#B5AA9F] hover:border-[#E6C29F] hover:text-[#F3ECE4]"
                       >
                         Edit
                       </button>
@@ -332,15 +342,24 @@ export function ProfilesView({
                 Executable Mappings
               </h2>
               <p className="text-xs text-[#94897E]">
-                Add `.exe` names to apply a profile automatically when that window gains focus.
+                Add executable names (e.g. cs2.exe) to apply a profile automatically on focus.
               </p>
             </div>
           </div>
 
+          {mapError && (
+            <div
+              role="alert"
+              className="rounded-[8px] border border-[#FF6B6F]/50 bg-[#241112] px-3 py-2 text-xs text-[#FF6B6F]"
+            >
+              {mapError}
+            </div>
+          )}
+
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              handleAddMapping(mapExe, mapProfileId);
+              handleAddMapping(mapExe, effectiveMapProfileId);
             }}
             className="flex flex-wrap items-center gap-2"
           >
@@ -350,13 +369,13 @@ export function ProfilesView({
               onChange={(e) => setMapExe(e.target.value)}
               placeholder="e.g. cs2.exe"
               aria-label="Executable file name"
-              className="min-w-[180px] flex-1 rounded-[8px] border border-[#282320] bg-[#0A0908] px-3 py-1.5 font-mono text-xs text-[#F3ECE4] placeholder:text-[#94897E] focus:border-[#E6C29F] focus:outline-none"
+              className="min-w-[180px] flex-1 rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-3 py-1.5 font-mono text-xs text-[#F3ECE4] placeholder:text-[#94897E] focus:border-[#E6C29F] focus:outline-none"
             />
             <select
-              value={mapProfileId}
+              value={effectiveMapProfileId}
               onChange={(e) => setMapProfileId(e.target.value)}
               aria-label="Target profile"
-              className="rounded-[8px] border border-[#282320] bg-[#0A0908] px-3 py-1.5 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
+              className="rounded-[8px] border border-[#6E655E] bg-[#0A0908] px-3 py-1.5 text-xs text-[#F3ECE4] focus:border-[#E6C29F] focus:outline-none"
             >
               {settings.profiles.map((p) => (
                 <option key={p.id} value={p.id}>
