@@ -1,6 +1,6 @@
 [package]
 name = "kage"
-version = "2.0.0"
+version = "2.0.1"
 description = "KAGE: lightweight instant replay and direct screen recorder for Windows"
 authors = ["KAGE Contributors"]
 license = "MIT"

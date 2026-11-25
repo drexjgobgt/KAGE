@@ -264,6 +264,39 @@ fn validate_output_dir(raw: &str) -> Result<PathBuf, String> {
     Ok(p)
 }
 
+fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            if !rest.to_ascii_uppercase().starts_with("UNC\\") {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
+fn retry_fs_op<F, T>(mut f: F) -> std::io::Result<T>
+where
+    F: FnMut() -> std::io::Result<T>,
+{
+    for attempt in 0..6 {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                let retryable = e.kind() == std::io::ErrorKind::PermissionDenied
+                    || matches!(e.raw_os_error(), Some(32) | Some(33));
+                if !retryable || attempt == 5 {
+                    return Err(e);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+    unreachable!()
+}
+
 fn validate_clip_path(output_dir: &Path, raw: &str) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.contains("://") || trimmed.starts_with("\\\\") {
@@ -284,7 +317,7 @@ fn validate_clip_path(output_dir: &Path, raw: &str) -> Result<PathBuf, String> {
     if !canon_target.starts_with(&canon_root) {
         return Err("Clip path must reside inside the configured output directory".into());
     }
-    Ok(canon_target)
+    Ok(strip_verbatim_prefix(&canon_target))
 }
 
 fn game_folder_name(exe: &str) -> Option<String> {
@@ -512,7 +545,7 @@ pub async fn trim_clip(
             .map_err(|e| e.to_string())?;
 
         if overwrite {
-            if let Err(e) = std::fs::rename(&dest, &source) {
+            if let Err(e) = retry_fs_op(|| std::fs::rename(&dest, &source)) {
                 let _ = std::fs::remove_file(&dest);
                 return Err(e.to_string());
             }
@@ -533,7 +566,7 @@ pub async fn delete_clip(state: State<'_, AppState>, path: String) -> Result<(),
     let dir = state.output_dir();
     tauri::async_runtime::spawn_blocking(move || {
         let safe = validate_clip_path(&dir, &path)?;
-        library::delete_clip(&safe).map_err(|e| e.to_string())
+        retry_fs_op(|| std::fs::remove_file(&safe)).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("delete task panicked: {e}"))?
@@ -582,13 +615,14 @@ pub async fn rename_clip(
         if dest != src && dest.exists() {
             return Err("A clip with that name already exists".into());
         }
-        std::fs::rename(&src, &dest).map_err(|e| e.to_string())?;
+        retry_fs_op(|| std::fs::rename(&src, &dest)).map_err(|e| e.to_string())?;
         Ok(dest)
     })
     .await
     .map_err(|e| format!("rename task panicked: {e}"))??;
 
-    let src_canon = validate_clip_path(&state.output_dir(), &dest.to_string_lossy()).unwrap_or(dest);
+    let src_canon = validate_clip_path(&state.output_dir(), &dest.to_string_lossy())
+        .unwrap_or_else(|_| strip_verbatim_prefix(&dest));
     state
         .clip_meta
         .lock()
@@ -1383,5 +1417,18 @@ mod tests {
             assert!(cut >= 0.2);
             assert!(cut <= 9.8);
         }
+    }
+
+    #[test]
+    fn validate_clip_path_strips_verbatim_prefix() {
+        let dir = std::env::temp_dir().join(format!("kage-val-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sample.mp4");
+        std::fs::write(&file, b"mp4").unwrap();
+        let safe = super::validate_clip_path(&dir, &file.to_string_lossy()).unwrap();
+        let s = safe.to_string_lossy();
+        assert!(!s.starts_with(r"\\?\"), "unexpected verbatim prefix: {s}");
+        assert!(safe.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

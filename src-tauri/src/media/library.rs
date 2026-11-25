@@ -390,7 +390,13 @@ mod imp {
 
     fn wide(p: &Path) -> Vec<u16> {
         use std::os::windows::ffi::OsStrExt;
-        p.as_os_str()
+        let s = p.to_string_lossy();
+        let clean = match s.strip_prefix(r"\\?\") {
+            Some(rest) if !rest.to_ascii_uppercase().starts_with("UNC\\") => Path::new(rest),
+            _ => p,
+        };
+        clean
+            .as_os_str()
             .encode_wide()
             .chain(std::iter::once(0))
             .collect()
@@ -400,7 +406,7 @@ mod imp {
         RecorderError::Win(format!("{} (0x{:08X})", e.message(), e.code().0 as u32))
     }
 
-    unsafe fn open_reader(path: &Path, compressed: bool) -> RResult<IMFSourceReader> {
+    unsafe fn open_reader(path: &Path, compressed: bool, hardware: bool) -> RResult<IMFSourceReader> {
         let mut attrs: Option<IMFAttributes> = None;
         MFCreateAttributes(&mut attrs, 4).map_err(err)?;
         let attrs = attrs.ok_or_else(|| RecorderError::Other("reader attrs".into()))?;
@@ -409,9 +415,11 @@ mod imp {
                 .SetUINT32(&MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, 1)
                 .map_err(err)?;
         }
-        attrs
-            .SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)
-            .map_err(err)?;
+        if hardware {
+            attrs
+                .SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)
+                .map_err(err)?;
+        }
         let w = wide(path);
         MFCreateSourceReaderFromURL(PCWSTR(w.as_ptr()), &attrs).map_err(err)
     }
@@ -419,7 +427,7 @@ mod imp {
     pub(super) fn probe(path: &Path) -> RResult<ProbeResult> {
         let _mf = Mf::enter()?;
         unsafe {
-            let reader = open_reader(path, true)?;
+            let reader = open_reader(path, true, true)?;
             let mut out = ProbeResult::default();
 
             if let Ok(v) = reader.GetPresentationAttribute(
@@ -458,62 +466,107 @@ mod imp {
         max_width: u32,
     ) -> RResult<(Vec<u8>, u32, u32)> {
         let _mf = Mf::enter()?;
+        let seek_secs = if at_seconds.is_finite() {
+            at_seconds.max(0.0)
+        } else {
+            0.0
+        };
+
         unsafe {
-            let reader = open_reader(path, false)?;
+            let mut reader_opt = None;
+            let mut last_err = None;
+            for hardware in [true, false] {
+                let r = match open_reader(path, false, hardware) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        last_err = Some(e);
+                        continue;
+                    }
+                };
+                if let Err(e) = r
+                    .SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)
+                    .map_err(err)
+                    .and_then(|_| {
+                        r.SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32, true)
+                            .map_err(err)
+                    })
+                    .and_then(|_| {
+                        let rgb = MFCreateMediaType().map_err(err)?;
+                        rgb.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
+                            .map_err(err)?;
+                        rgb.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32)
+                            .map_err(err)?;
+                        r.SetCurrentMediaType(
+                            MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
+                            None,
+                            &rgb,
+                        )
+                        .map_err(err)
+                    })
+                {
+                    last_err = Some(e);
+                    continue;
+                }
+                reader_opt = Some(r);
+                break;
+            }
+            let reader = reader_opt
+                .ok_or_else(|| last_err.unwrap_or_else(|| RecorderError::Other("reader init failed".into())))?;
 
-            reader
-                .SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)
-                .map_err(err)?;
-            reader
-                .SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32, true)
-                .map_err(err)?;
-
-            let rgb = MFCreateMediaType().map_err(err)?;
-            rgb.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
-                .map_err(err)?;
-            rgb.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32)
-                .map_err(err)?;
-            reader
-                .SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32, None, &rgb)
-                .map_err(err)?;
-
-            let pos = (at_seconds as f64 * HNS_PER_SECOND as f64) as i64;
+            let pos = (seek_secs as f64 * HNS_PER_SECOND as f64) as i64;
             let var = windows::core::PROPVARIANT::from(pos);
             let _ = reader.SetCurrentPosition(&windows::core::GUID::zeroed(), &var);
 
-            let current = reader
+            let mut current = reader
                 .GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32)
                 .map_err(err)?;
+
+            let mut sample: Option<IMFSample> = None;
+            for pass in 0..2 {
+                if pass == 1 {
+                    let zero = windows::core::PROPVARIANT::from(0i64);
+                    let _ = reader.SetCurrentPosition(&windows::core::GUID::zeroed(), &zero);
+                }
+                for _ in 0..48 {
+                    let mut stream_index = 0u32;
+                    let mut flags = 0u32;
+                    let mut ts = 0i64;
+                    let mut s: Option<IMFSample> = None;
+                    reader
+                        .ReadSample(
+                            MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
+                            0,
+                            Some(&mut stream_index),
+                            Some(&mut flags),
+                            Some(&mut ts),
+                            Some(&mut s),
+                        )
+                        .map_err(err)?;
+                    if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32) != 0 {
+                        if let Ok(updated) = reader
+                            .GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32)
+                        {
+                            current = updated;
+                        }
+                    }
+                    if (flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32) != 0 {
+                        break;
+                    }
+                    if s.is_some() {
+                        sample = s;
+                        break;
+                    }
+                }
+                if sample.is_some() || pos == 0 {
+                    break;
+                }
+            }
+
             let size = current.GetUINT64(&MF_MT_FRAME_SIZE).map_err(err)?;
             let w = (size >> 32) as u32;
             let h = (size & 0xFFFF_FFFF) as u32;
             if w == 0 || h == 0 {
                 return Err(RecorderError::Other("thumbnail: zero frame size".into()));
-            }
-
-            let mut sample: Option<IMFSample> = None;
-            for _ in 0..24 {
-                let mut stream_index = 0u32;
-                let mut flags = 0u32;
-                let mut ts = 0i64;
-                let mut s: Option<IMFSample> = None;
-                reader
-                    .ReadSample(
-                        MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
-                        0,
-                        Some(&mut stream_index),
-                        Some(&mut flags),
-                        Some(&mut ts),
-                        Some(&mut s),
-                    )
-                    .map_err(err)?;
-                if (flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32) != 0 {
-                    break;
-                }
-                if s.is_some() {
-                    sample = s;
-                    break;
-                }
             }
 
             let sample = sample.ok_or_else(|| RecorderError::Other("thumbnail: no frame".into()))?;
@@ -608,6 +661,38 @@ mod imp {
         Ok(jpg)
     }
 
+    unsafe fn clone_aac_media_type(src: &IMFMediaType) -> RResult<IMFMediaType> {
+        let atype = MFCreateMediaType().map_err(err)?;
+        atype
+            .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)
+            .map_err(err)?;
+        atype
+            .SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_AAC)
+            .map_err(err)?;
+        for key in [
+            &MF_MT_AUDIO_SAMPLES_PER_SECOND,
+            &MF_MT_AUDIO_NUM_CHANNELS,
+            &MF_MT_AUDIO_BITS_PER_SAMPLE,
+            &MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+            &MF_MT_AUDIO_BLOCK_ALIGNMENT,
+            &MF_MT_AAC_PAYLOAD_TYPE,
+            &MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION,
+        ] {
+            if let Ok(v) = src.GetUINT32(key) {
+                let _ = atype.SetUINT32(key, v);
+            }
+        }
+        if let Ok(sz) = src.GetBlobSize(&MF_MT_USER_DATA) {
+            if sz > 0 {
+                let mut blob = vec![0u8; sz as usize];
+                if src.GetBlob(&MF_MT_USER_DATA, &mut blob, None).is_ok() {
+                    let _ = atype.SetBlob(&MF_MT_USER_DATA, &blob);
+                }
+            }
+        }
+        Ok(atype)
+    }
+
     pub(super) fn trim(
         source: &Path,
         dest: &Path,
@@ -616,7 +701,7 @@ mod imp {
     ) -> RResult<(f32, f32)> {
         let _mf = Mf::enter()?;
         unsafe {
-            let reader = open_reader(source, true)?;
+            let reader = open_reader(source, true, true)?;
             let mut video_stream_idx = None;
             let mut audio_stream_idx = None;
             for i in 0..16 {
@@ -644,7 +729,7 @@ mod imp {
                 .GetNativeMediaType(video_stream_idx, 0)
                 .map_err(err)?;
 
-            let audio_type = if let Some(idx) = audio_stream_idx {
+            let mut audio_type = if let Some(idx) = audio_stream_idx {
                 let _ = reader.SetStreamSelection(idx, true);
                 reader.GetNativeMediaType(idx, 0).ok()
             } else {
@@ -670,12 +755,31 @@ mod imp {
 
             let a_out = match audio_type.as_ref() {
                 Some(t) => {
-                    let s = writer.AddStream(t).map_err(err)?;
-                    writer.SetInputMediaType(s, t, None).map_err(err)?;
-                    Some(s)
+                    let try_add = |mt: &IMFMediaType| -> RResult<u32> {
+                        let s = writer.AddStream(mt).map_err(err)?;
+                        writer.SetInputMediaType(s, mt, None).map_err(err)?;
+                        Ok(s)
+                    };
+                    match try_add(t) {
+                        Ok(s) => Some(s),
+                        Err(_) => match clone_aac_media_type(t).and_then(|c| try_add(&c)) {
+                            Ok(s) => Some(s),
+                            Err(e) => {
+                                log::warn!(
+                                    "[kage::trim] skipping audio stream due to incompatible input type: {e}"
+                                );
+                                if let Some(idx) = audio_stream_idx {
+                                    let _ = reader.SetStreamSelection(idx, false);
+                                }
+                                audio_type = None;
+                                None
+                            }
+                        },
+                    }
                 }
                 None => None,
             };
+            let _ = audio_type;
 
             writer.BeginWriting().map_err(err)?;
 
@@ -709,7 +813,17 @@ mod imp {
                     .map_err(err)?;
 
                 if (flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32) != 0 {
-                    break;
+                    if stream_index == video_stream_idx {
+                        video_done = true;
+                    } else if Some(stream_index) == audio_stream_idx {
+                        audio_done = true;
+                    } else {
+                        break;
+                    }
+                    if video_done && audio_done {
+                        break;
+                    }
+                    continue;
                 }
                 let Some(sample) = sample else { continue };
 
@@ -722,8 +836,9 @@ mod imp {
                         continue;
                     }
                     if base.is_none() {
-                        let is_clean = sample.GetUINT32(&MFSampleExtension_CleanPoint).unwrap_or(1) == 1;
-                        if !is_clean && ts < start_hns + HNS_PER_SECOND {
+                        let is_clean =
+                            sample.GetUINT32(&MFSampleExtension_CleanPoint).unwrap_or(1) == 1;
+                        if start > 0.05 && !is_clean && ts < start_hns + HNS_PER_SECOND {
                             continue;
                         }
                         base = Some(ts);
@@ -758,9 +873,11 @@ mod imp {
                 }
             }
 
+            let base_ts = base.ok_or_else(|| {
+                RecorderError::Other("no video frames found in the selected range".into())
+            })?;
             writer.Finalize().map_err(err)?;
-            let duration =
-                (last_end - base.unwrap_or(start_hns)).max(0) as f32 / HNS_PER_SECOND as f32;
+            let duration = (last_end - base_ts).max(0) as f32 / HNS_PER_SECOND as f32;
             Ok((duration, snapped))
         }
     }
@@ -1075,5 +1192,44 @@ mod tests {
         assert_ne!(a, c);
         assert!(a.to_string_lossy().ends_with(".jpg"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(all(windows, not(feature = "headless-sim")))]
+    #[test]
+    fn real_clip_probe_snapshot_trim_and_split_succeed() {
+        let clip = Path::new(r"D:\ClipFlow\chrome\KAGE_Replay_2026-11-25_15-47-25.mp4");
+        if !clip.exists() {
+            return;
+        }
+        let info = super::probe(clip).expect("probe real clip");
+        assert!(info.duration_seconds > 1.0);
+        assert!(info.width > 0 && info.height > 0);
+
+        let png_mid = super::extract_frame_png(clip, 1.0, 0).expect("extract_frame_png mid");
+        assert!(png_mid.starts_with("data:image/png;base64,"));
+        let png_end =
+            super::extract_frame_png(clip, info.duration_seconds, 0).expect("extract_frame_png end");
+        assert!(png_end.starts_with("data:image/png;base64,"));
+
+        let thumb = super::extract_thumbnail(clip, 1.0).expect("extract_thumbnail");
+        assert!(thumb.starts_with("data:image/jpeg;base64,"));
+
+        let out_dir = temp_dir("real-mp4-ops");
+        let trimmed = out_dir.join("trimmed.mp4");
+        let res_trim = super::trim_stream_copy(clip, &trimmed, 1.0, 5.0).expect("trim real clip");
+        assert!(res_trim.size_bytes > 0);
+        assert!(super::probe(&trimmed).expect("probe trimmed").duration_seconds > 0.5);
+
+        let mid = info.duration_seconds * 0.5;
+        let part_a = out_dir.join("part_a.mp4");
+        let part_b = out_dir.join("part_b.mp4");
+        let ra = super::trim_stream_copy(clip, &part_a, 0.0, mid).expect("split part A");
+        let rb = super::trim_stream_copy(clip, &part_b, mid, info.duration_seconds)
+            .expect("split part B");
+        assert!(ra.size_bytes > 0 && rb.size_bytes > 0);
+        assert!(super::probe(&part_a).expect("probe part A").duration_seconds > 0.5);
+        assert!(super::probe(&part_b).expect("probe part B").duration_seconds > 0.5);
+
+        std::fs::remove_dir_all(&out_dir).ok();
     }
 }

@@ -2,6 +2,16 @@
 
 All notable changes to **KAGE Studio** (formerly ClipFlow) are documented here. The project follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-11-25
+
+### Fixed
+
+- **Windows `split`, `snapshot`, and `trim` failures**:
+  - Stripped the Windows verbatim `\\?\` prefix returned by `std::fs::canonicalize()` in `validate_clip_path` (`commands.rs`) and `imp::wide` (`library.rs`) so Windows Media Foundation (`MFCreateSourceReaderFromURL` / `MFCreateSinkWriterFromURL`) and Win32 shell/clipboard APIs receive standard paths.
+  - Hardened `decode_frame_rgb` in `library.rs` to fall back to CPU Media Foundation decoding when hardware transforms fail without a D3D manager, re-read output media types on `MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED`, and fall back to frame `0` if seeking hits end-of-stream.
+  - Hardened `trim` in `library.rs` to track per-stream EOF independently, accept frame `0` for `start <= 0.05` splits, avoid finalizing empty sinks, and normalize AAC stream media types before failing.
+  - Added transient sharing-violation retries (`ERROR_SHARING_VIOLATION`) on overwrite `trim_clip`, `rename_clip`, and `delete_clip`.
+
 ## [2.0.0] - 2026-11-25
 
 ### Added
