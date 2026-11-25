@@ -1,0 +1,4000 @@
+[
+  {
+    "command": "page.rename",
+    "params": {
+      "name": "Brand & Logo"
+    }
+  },
+  {
+    "command": "page.setBackground",
+    "params": {
+      "id": 1,
+      "color": "#070605"
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "KAGE-Icon-1024",
+      "x": 0,
+      "y": 0,
+      "width": 1024,
+      "height": 1024,
+      "props": {
+        "fill": "#0A0908",
+        "cornerRadius": 224,
+        "stroke": "#282320",
+        "strokeWeight": 14,
+        "strokeAlign": "inside",
+        "clip": true
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "DiagonalSurface",
+      "x": 0,
+      "y": 0,
+      "path": "M 560 0 L 1024 0 L 1024 1024 L 220 1024 Z",
+      "closed": true,
+      "parent": 2,
+      "props": {
+        "fill": "#12100E"
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "DiagonalSeam",
+      "x": 0,
+      "y": 0,
+      "path": "M 556 0 L 564 0 L 224 1024 L 216 1024 Z",
+      "closed": true,
+      "parent": 2,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "K-Spine",
+      "x": 236,
+      "y": 196,
+      "path": "M 0 0 L 116 0 L 116 632 L 0 632 Z",
+      "closed": true,
+      "parent": 2,
+      "props": {
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "K-UpperBlade",
+      "x": 352,
+      "y": 196,
+      "path": "M 0 316 L 324 0 L 464 0 L 122 334 Z",
+      "closed": true,
+      "parent": 2,
+      "props": {
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "K-LowerBlade",
+      "x": 352,
+      "y": 478,
+      "path": "M 122 0 L 464 350 L 320 350 L 0 34 Z",
+      "closed": true,
+      "parent": 2,
+      "props": {
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "K-RecAperture",
+      "x": 686,
+      "y": 452,
+      "width": 120,
+      "height": 120,
+      "parent": 2,
+      "props": {
+        "fill": "#E5484D"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "KAGE-Wordmark",
+      "x": 1120,
+      "y": 0,
+      "width": 1080,
+      "height": 360,
+      "props": {
+        "fill": "#0A0908",
+        "cornerRadius": 24,
+        "stroke": "#282320",
+        "strokeWeight": 2
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "MiniMark",
+      "x": 64,
+      "y": 64,
+      "width": 128,
+      "height": 128,
+      "parent": 9,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 28,
+        "stroke": "#282320",
+        "strokeWeight": 2
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "MiniSpine",
+      "x": 30,
+      "y": 26,
+      "path": "M 0 0 L 15 0 L 15 76 L 0 76 Z",
+      "closed": true,
+      "parent": 10,
+      "props": {
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "MiniUp",
+      "x": 45,
+      "y": 26,
+      "path": "M 0 38 L 38 0 L 55 0 L 12 43 Z",
+      "closed": true,
+      "parent": 10,
+      "props": {
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "MiniDown",
+      "x": 47,
+      "y": 62,
+      "path": "M 11 0 L 53 40 L 35 40 L 0 6 Z",
+      "closed": true,
+      "parent": 10,
+      "props": {
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "MiniRec",
+      "x": 84,
+      "y": 56,
+      "width": 16,
+      "height": 16,
+      "parent": 10,
+      "props": {
+        "fill": "#E5484D"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "WordmarkTitle",
+      "characters": "K A G E",
+      "x": 224,
+      "y": 66,
+      "parent": 9,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 68,
+        "fill": "#F3ECE4",
+        "letterSpacing": 10
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "WordmarkSub",
+      "characters": "INSTANT REPLAY & DIRECT CAPTURE STUDIO",
+      "x": 228,
+      "y": 158,
+      "parent": 9,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F",
+        "letterSpacing": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Swatch-Obsidian",
+      "x": 64,
+      "y": 236,
+      "width": 172,
+      "height": 64,
+      "parent": 9,
+      "props": {
+        "fill": "#0A0908",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "SwatchLabel-Obsidian",
+      "characters": "Obsidian  #0A0908",
+      "x": 64,
+      "y": 310,
+      "parent": 9,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Swatch-Charcoal",
+      "x": 256,
+      "y": 236,
+      "width": 172,
+      "height": 64,
+      "parent": 9,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "SwatchLabel-Charcoal",
+      "characters": "Charcoal  #12100E",
+      "x": 256,
+      "y": 310,
+      "parent": 9,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Swatch-Champagne",
+      "x": 448,
+      "y": 236,
+      "width": 172,
+      "height": 64,
+      "parent": 9,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "SwatchLabel-Champagne",
+      "characters": "Champagne  #E6C29F",
+      "x": 448,
+      "y": 310,
+      "parent": 9,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Swatch-Crimson REC",
+      "x": 640,
+      "y": 236,
+      "width": 172,
+      "height": 64,
+      "parent": 9,
+      "props": {
+        "fill": "#C92A32",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "SwatchLabel-Crimson REC",
+      "characters": "Crimson REC  #C92A32",
+      "x": 640,
+      "y": 310,
+      "parent": 9,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Swatch-Warm Ivory",
+      "x": 832,
+      "y": 236,
+      "width": 172,
+      "height": 64,
+      "parent": 9,
+      "props": {
+        "fill": "#F3ECE4",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "SwatchLabel-Warm Ivory",
+      "characters": "Warm Ivory  #F3ECE4",
+      "x": 832,
+      "y": 310,
+      "parent": 9,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "page.add",
+    "params": {
+      "name": "Desktop Screens"
+    }
+  },
+  {
+    "command": "page.setBackground",
+    "params": {
+      "id": 27,
+      "color": "#050504"
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "01-Studio-Armed",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 820,
+      "parent": 27,
+      "props": {
+        "fill": "#0A0908",
+        "clip": true
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TitleBar",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 36,
+      "parent": 28,
+      "props": {
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TitleDivider",
+      "x": 0,
+      "y": 35,
+      "width": 1280,
+      "height": 1,
+      "parent": 29,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "MiniK",
+      "x": 16,
+      "y": 10,
+      "width": 14,
+      "height": 16,
+      "parent": 29,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "AppTitle",
+      "characters": "KAGE Studio",
+      "x": 38,
+      "y": 10,
+      "parent": 29,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "EncoderBadge",
+      "characters": "NVENC H.264  1080p60  GAME MODE",
+      "x": 138,
+      "y": 11,
+      "parent": 29,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "WinCtrls",
+      "characters": "Pin    _    []    x",
+      "x": 1164,
+      "y": 10,
+      "parent": 29,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "Sidebar",
+      "x": 0,
+      "y": 36,
+      "width": 220,
+      "height": 720,
+      "parent": 28,
+      "props": {
+        "fill": "#0D0B0A"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "SideBorder",
+      "x": 219,
+      "y": 0,
+      "width": 1,
+      "height": 720,
+      "parent": 35,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BrandHeader",
+      "characters": "KAGE",
+      "x": 24,
+      "y": 24,
+      "parent": 35,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 28,
+        "fill": "#F3ECE4",
+        "letterSpacing": 4
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BrandVer",
+      "characters": "v2.0  LOCAL ONLY",
+      "x": 25,
+      "y": 60,
+      "parent": 35,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 10,
+        "fill": "#94897E",
+        "letterSpacing": 1.5
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "NavActive-Studio",
+      "x": 14,
+      "y": 108,
+      "width": 192,
+      "height": 36,
+      "parent": 35,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "NavIndicator-Studio",
+      "x": 14,
+      "y": 116,
+      "width": 3,
+      "height": 20,
+      "parent": 35,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 2
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Studio",
+      "characters": "Studio",
+      "x": 32,
+      "y": 118,
+      "parent": 35,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Library",
+      "characters": "Library",
+      "x": 32,
+      "y": 162,
+      "parent": 35,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Profiles",
+      "characters": "Profiles",
+      "x": 32,
+      "y": 206,
+      "parent": 35,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Telemetry",
+      "characters": "Telemetry",
+      "x": 32,
+      "y": 250,
+      "parent": 35,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Settings",
+      "characters": "Settings",
+      "x": 32,
+      "y": 294,
+      "parent": 35,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "HardwareCard",
+      "x": 14,
+      "y": 608,
+      "width": 192,
+      "height": 92,
+      "parent": 35,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwTitle",
+      "characters": "NVIDIA NVENC",
+      "x": 14,
+      "y": 12,
+      "parent": 46,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwRam",
+      "characters": "Process RSS: 114 MB",
+      "x": 14,
+      "y": 34,
+      "parent": 46,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwRing",
+      "characters": "Ring Buffer: 88.2 MB",
+      "x": 14,
+      "y": 54,
+      "parent": 46,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TransportBar",
+      "x": 0,
+      "y": 756,
+      "width": 1280,
+      "height": 64,
+      "parent": 28,
+      "props": {
+        "fill": "#12100E"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TransDivider",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 1,
+      "parent": 50,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "TransDot",
+      "x": 24,
+      "y": 27,
+      "width": 10,
+      "height": 10,
+      "parent": 50,
+      "props": {
+        "fill": "#4ADE80"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TransState",
+      "characters": "Buffer Armed  58.4 / 60s",
+      "x": 44,
+      "y": 23,
+      "parent": 50,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "ProgressBg",
+      "x": 236,
+      "y": 29,
+      "width": 220,
+      "height": 6,
+      "parent": 50,
+      "props": {
+        "fill": "#282320",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "ProgressFill",
+      "x": 236,
+      "y": 29,
+      "width": 206,
+      "height": 6,
+      "parent": 50,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TBtnSave",
+      "x": 520,
+      "y": 14,
+      "width": 148,
+      "height": 36,
+      "parent": 50,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 18
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TBtnSaveTxt",
+      "characters": "Save Replay  Alt+C",
+      "x": 538,
+      "y": 24,
+      "parent": 50,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TBtnRec",
+      "x": 680,
+      "y": 14,
+      "width": 152,
+      "height": 36,
+      "parent": 50,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 6,
+        "stroke": "#C92A32",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TBtnRecTxt",
+      "characters": "REC  Alt+R",
+      "x": 722,
+      "y": 24,
+      "parent": 50,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#FF6B6F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TransAudio",
+      "characters": "Game 100%   |   Mic Off   |   Folder",
+      "x": 1030,
+      "y": 24,
+      "parent": 50,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "MainStudio",
+      "x": 220,
+      "y": 36,
+      "width": 1060,
+      "height": 720,
+      "parent": 28,
+      "props": {
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "HeroOuterBezel",
+      "x": 28,
+      "y": 22,
+      "width": 1004,
+      "height": 360,
+      "parent": 61,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 16,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "HeroInnerCore",
+      "x": 6,
+      "y": 6,
+      "width": 992,
+      "height": 348,
+      "parent": 62,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 12,
+        "clip": true
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "HeroSlashBg",
+      "x": 560,
+      "y": 0,
+      "path": "M 180 0 L 432 0 L 432 348 L 0 348 Z",
+      "closed": true,
+      "parent": 63,
+      "props": {
+        "fill": "#161311"
+      }
+    }
+  },
+  {
+    "command": "vector.create",
+    "params": {
+      "name": "HeroSlashSeam",
+      "x": 558,
+      "y": 0,
+      "path": "M 180 0 L 182 0 L 2 348 L 0 348 Z",
+      "closed": true,
+      "parent": 63,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "StatusDot",
+      "x": 32,
+      "y": 31,
+      "width": 8,
+      "height": 8,
+      "parent": 63,
+      "props": {
+        "fill": "#4ADE80"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "StatusLine",
+      "characters": "BUFFER ARMED  ·  60S ROLLING  ·  GAME MODE 1080P60",
+      "x": 48,
+      "y": 28,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F",
+        "letterSpacing": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HeroHeadline",
+      "characters": "Shadow buffer armed.",
+      "x": 32,
+      "y": 60,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 48,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HeroSub",
+      "characters": "58.4s cached in GPU-encoded memory. Flush instantly with Alt + C or start direct MP4 streaming with Alt + R.",
+      "x": 32,
+      "y": 128,
+      "width": 680,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 14,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "BtnSavePrimary",
+      "x": 32,
+      "y": 186,
+      "width": 196,
+      "height": 46,
+      "parent": 63,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 23
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BtnSaveLabel",
+      "characters": "Save Replay  Alt+C",
+      "x": 64,
+      "y": 201,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 14,
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "DurationSeg",
+      "x": 242,
+      "y": 186,
+      "width": 224,
+      "height": 46,
+      "parent": 63,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "Seg-15s",
+      "characters": "15s",
+      "x": 20,
+      "y": 15,
+      "parent": 72,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "Seg-30s",
+      "characters": "30s",
+      "x": 73,
+      "y": 15,
+      "parent": 72,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "SegActive",
+      "x": 112,
+      "y": 5,
+      "width": 50,
+      "height": 36,
+      "parent": 72,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 6
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "Seg-60s",
+      "characters": "60s",
+      "x": 126,
+      "y": 15,
+      "parent": 72,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "Seg-Full",
+      "characters": "Full",
+      "x": 179,
+      "y": 15,
+      "parent": 72,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "BtnRecTactical",
+      "x": 482,
+      "y": 186,
+      "width": 168,
+      "height": 46,
+      "parent": 63,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 6,
+        "stroke": "#C92A32",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "BtnRecDot",
+      "x": 502,
+      "y": 204,
+      "width": 10,
+      "height": 10,
+      "parent": 63,
+      "props": {
+        "fill": "#E5484D"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BtnRecLabel",
+      "characters": "REC  Alt+R",
+      "x": 522,
+      "y": 201,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#FF6B6F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "BtnDisarm",
+      "x": 664,
+      "y": 186,
+      "width": 112,
+      "height": 46,
+      "parent": 63,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 8,
+        "stroke": "#6E655E",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BtnDisarmLabel",
+      "characters": "Disarm",
+      "x": 696,
+      "y": 201,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "AudioRule",
+      "x": 32,
+      "y": 264,
+      "width": 928,
+      "height": 1,
+      "parent": 63,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "GameVolTxt",
+      "characters": "Game Audio  100%",
+      "x": 32,
+      "y": 288,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "GameBarBg",
+      "x": 156,
+      "y": 293,
+      "width": 220,
+      "height": 6,
+      "parent": 63,
+      "props": {
+        "fill": "#282320",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "GameBarFill",
+      "x": 156,
+      "y": 293,
+      "width": 220,
+      "height": 6,
+      "parent": 63,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "MicVolTxt",
+      "characters": "Microphone  Off",
+      "x": 428,
+      "y": 288,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "MicBarBg",
+      "x": 544,
+      "y": 293,
+      "width": 180,
+      "height": 6,
+      "parent": 63,
+      "props": {
+        "fill": "#282320",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "DiskFreeTxt",
+      "characters": "Disk Free: 184.2 GB",
+      "x": 826,
+      "y": 288,
+      "parent": 63,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "RecentHeading",
+      "characters": "Recent Captures",
+      "x": 28,
+      "y": 408,
+      "parent": 61,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 26,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "RecentLink",
+      "characters": "Open Library",
+      "x": 944,
+      "y": 416,
+      "parent": 61,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "ClipOuter-0",
+      "x": 28,
+      "y": 454,
+      "width": 240,
+      "height": 232,
+      "parent": 61,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 14,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "ClipInner-0",
+      "x": 4,
+      "y": 4,
+      "width": 232,
+      "height": 224,
+      "parent": 92,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Thumb-0",
+      "x": 8,
+      "y": 8,
+      "width": 216,
+      "height": 122,
+      "parent": 93,
+      "props": {
+        "fill": "#1D1916",
+        "cornerRadius": 8
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "DurBadge-0",
+      "x": 170,
+      "y": 100,
+      "width": 46,
+      "height": 22,
+      "parent": 93,
+      "props": {
+        "fill": "#0A0908",
+        "cornerRadius": 4
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "DurTxt-0",
+      "characters": "00:58",
+      "x": 178,
+      "y": 105,
+      "parent": 93,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "ClipTitle-0",
+      "characters": "KAGE Replay 13:24",
+      "x": 12,
+      "y": 144,
+      "parent": 93,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "ClipMeta-0",
+      "characters": "cs2 · 58.2s · 44.1 MB",
+      "x": 12,
+      "y": 168,
+      "parent": 93,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "ClipOuter-1",
+      "x": 283,
+      "y": 454,
+      "width": 240,
+      "height": 232,
+      "parent": 61,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 14,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "ClipInner-1",
+      "x": 4,
+      "y": 4,
+      "width": 232,
+      "height": 224,
+      "parent": 99,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Thumb-1",
+      "x": 8,
+      "y": 8,
+      "width": 216,
+      "height": 122,
+      "parent": 100,
+      "props": {
+        "fill": "#1D1916",
+        "cornerRadius": 8
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "DurBadge-1",
+      "x": 170,
+      "y": 100,
+      "width": 46,
+      "height": 22,
+      "parent": 100,
+      "props": {
+        "fill": "#0A0908",
+        "cornerRadius": 4
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "DurTxt-1",
+      "characters": "02:14",
+      "x": 178,
+      "y": 105,
+      "parent": 100,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "ClipTitle-1",
+      "characters": "KAGE Rec 12:51",
+      "x": 12,
+      "y": 144,
+      "parent": 100,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "ClipMeta-1",
+      "characters": "Direct MP4 · 02:14 · 198 MB",
+      "x": 12,
+      "y": 168,
+      "parent": 100,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "ClipOuter-2",
+      "x": 538,
+      "y": 454,
+      "width": 240,
+      "height": 232,
+      "parent": 61,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 14,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "ClipInner-2",
+      "x": 4,
+      "y": 4,
+      "width": 232,
+      "height": 224,
+      "parent": 106,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Thumb-2",
+      "x": 8,
+      "y": 8,
+      "width": 216,
+      "height": 122,
+      "parent": 107,
+      "props": {
+        "fill": "#1D1916",
+        "cornerRadius": 8
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "DurBadge-2",
+      "x": 170,
+      "y": 100,
+      "width": 46,
+      "height": 22,
+      "parent": 107,
+      "props": {
+        "fill": "#0A0908",
+        "cornerRadius": 4
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "DurTxt-2",
+      "characters": "00:30",
+      "x": 178,
+      "y": 105,
+      "parent": 107,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "ClipTitle-2",
+      "characters": "KAGE Replay 11:18",
+      "x": 12,
+      "y": 144,
+      "parent": 107,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "ClipMeta-2",
+      "characters": "valorant · 30.0s · 22.8 MB",
+      "x": 12,
+      "y": 168,
+      "parent": 107,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "ClipOuter-3",
+      "x": 793,
+      "y": 454,
+      "width": 240,
+      "height": 232,
+      "parent": 61,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 14,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "ClipInner-3",
+      "x": 4,
+      "y": 4,
+      "width": 232,
+      "height": 224,
+      "parent": 113,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Thumb-3",
+      "x": 8,
+      "y": 8,
+      "width": 216,
+      "height": 122,
+      "parent": 114,
+      "props": {
+        "fill": "#1D1916",
+        "cornerRadius": 8
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "DurBadge-3",
+      "x": 170,
+      "y": 100,
+      "width": 46,
+      "height": 22,
+      "parent": 114,
+      "props": {
+        "fill": "#0A0908",
+        "cornerRadius": 4
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "DurTxt-3",
+      "characters": "01:00",
+      "x": 178,
+      "y": 105,
+      "parent": 114,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "ClipTitle-3",
+      "characters": "KAGE Replay 10:02",
+      "x": 12,
+      "y": 144,
+      "parent": 114,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "ClipMeta-3",
+      "characters": "cs2 · 60.0s · 46.4 MB",
+      "x": 12,
+      "y": 168,
+      "parent": 114,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "02-Studio-Recording",
+      "x": 1360,
+      "y": 0,
+      "width": 1280,
+      "height": 820,
+      "parent": 27,
+      "props": {
+        "fill": "#0A0908",
+        "clip": true
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TitleBar",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 36,
+      "parent": 120,
+      "props": {
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TitleDivider",
+      "x": 0,
+      "y": 35,
+      "width": 1280,
+      "height": 1,
+      "parent": 121,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "MiniK",
+      "x": 16,
+      "y": 10,
+      "width": 14,
+      "height": 16,
+      "parent": 121,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "AppTitle",
+      "characters": "KAGE Studio",
+      "x": 38,
+      "y": 10,
+      "parent": 121,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "EncoderBadge",
+      "characters": "DIRECT REC  1080p60  NVENC",
+      "x": 138,
+      "y": 11,
+      "parent": 121,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#FF6B6F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "WinCtrls",
+      "characters": "Pin    _    []    x",
+      "x": 1164,
+      "y": 10,
+      "parent": 121,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "Sidebar",
+      "x": 0,
+      "y": 36,
+      "width": 220,
+      "height": 720,
+      "parent": 120,
+      "props": {
+        "fill": "#0D0B0A"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "SideBorder",
+      "x": 219,
+      "y": 0,
+      "width": 1,
+      "height": 720,
+      "parent": 127,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BrandHeader",
+      "characters": "KAGE",
+      "x": 24,
+      "y": 24,
+      "parent": 127,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 28,
+        "fill": "#F3ECE4",
+        "letterSpacing": 4
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BrandVer",
+      "characters": "v2.0  LOCAL ONLY",
+      "x": 25,
+      "y": 60,
+      "parent": 127,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 10,
+        "fill": "#94897E",
+        "letterSpacing": 1.5
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "NavActive-Studio",
+      "x": 14,
+      "y": 108,
+      "width": 192,
+      "height": 36,
+      "parent": 127,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "NavIndicator-Studio",
+      "x": 14,
+      "y": 116,
+      "width": 3,
+      "height": 20,
+      "parent": 127,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 2
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Studio",
+      "characters": "Studio",
+      "x": 32,
+      "y": 118,
+      "parent": 127,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Library",
+      "characters": "Library",
+      "x": 32,
+      "y": 162,
+      "parent": 127,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Profiles",
+      "characters": "Profiles",
+      "x": 32,
+      "y": 206,
+      "parent": 127,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Telemetry",
+      "characters": "Telemetry",
+      "x": 32,
+      "y": 250,
+      "parent": 127,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Settings",
+      "characters": "Settings",
+      "x": 32,
+      "y": 294,
+      "parent": 127,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "HardwareCard",
+      "x": 14,
+      "y": 608,
+      "width": 192,
+      "height": 92,
+      "parent": 127,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwTitle",
+      "characters": "NVIDIA NVENC",
+      "x": 14,
+      "y": 12,
+      "parent": 138,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwRam",
+      "characters": "Process RSS: 114 MB",
+      "x": 14,
+      "y": 34,
+      "parent": 138,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwRing",
+      "characters": "Disk Stream: 124.8 MB",
+      "x": 14,
+      "y": 54,
+      "parent": 138,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#FF6B6F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TransportBar",
+      "x": 0,
+      "y": 756,
+      "width": 1280,
+      "height": 64,
+      "parent": 120,
+      "props": {
+        "fill": "#12100E"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TransDivider",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 1,
+      "parent": 142,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "TransDot",
+      "x": 24,
+      "y": 27,
+      "width": 10,
+      "height": 10,
+      "parent": 142,
+      "props": {
+        "fill": "#E5484D"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TransState",
+      "characters": "Recording MP4  00:42",
+      "x": 44,
+      "y": 23,
+      "parent": 142,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "ProgressBg",
+      "x": 236,
+      "y": 29,
+      "width": 220,
+      "height": 6,
+      "parent": 142,
+      "props": {
+        "fill": "#282320",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "ProgressFill",
+      "x": 236,
+      "y": 29,
+      "width": 220,
+      "height": 6,
+      "parent": 142,
+      "props": {
+        "fill": "#E5484D",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TBtnSave",
+      "x": 520,
+      "y": 14,
+      "width": 148,
+      "height": 36,
+      "parent": 142,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 18
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TBtnSaveTxt",
+      "characters": "Save Replay  Alt+C",
+      "x": 538,
+      "y": 24,
+      "parent": 142,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TBtnRec",
+      "x": 680,
+      "y": 14,
+      "width": 152,
+      "height": 36,
+      "parent": 142,
+      "props": {
+        "fill": "#C92A32",
+        "cornerRadius": 6,
+        "stroke": "#E5484D",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TBtnRecTxt",
+      "characters": "STOP REC  00:42",
+      "x": 702,
+      "y": 24,
+      "parent": 142,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#FFFFFF"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TransAudio",
+      "characters": "Game 100%   |   Mic Off   |   Folder",
+      "x": 1030,
+      "y": 24,
+      "parent": 142,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "MainRec",
+      "x": 220,
+      "y": 36,
+      "width": 1060,
+      "height": 720,
+      "parent": 120,
+      "props": {
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "RecHeroOuter",
+      "x": 28,
+      "y": 22,
+      "width": 1004,
+      "height": 360,
+      "parent": 153,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 16,
+        "stroke": "#C92A32",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "RecHeroInner",
+      "x": 6,
+      "y": 6,
+      "width": 992,
+      "height": 348,
+      "parent": 154,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 12,
+        "clip": true
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "RecLiveDot",
+      "x": 32,
+      "y": 31,
+      "width": 10,
+      "height": 10,
+      "parent": 155,
+      "props": {
+        "fill": "#E5484D"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "RecStatusLine",
+      "characters": "DIRECT STREAMING TO MP4  ·  0 MB EXTRA RING RAM  ·  ALT+C REPLAY STILL ARMED",
+      "x": 50,
+      "y": 28,
+      "parent": 155,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#FF6B6F",
+        "letterSpacing": 1.3
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "RecHeadline",
+      "characters": "Recording live  00:42",
+      "x": 32,
+      "y": 60,
+      "parent": 155,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 48,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "RecSub",
+      "characters": "Streaming encoded H.264 + AAC frames straight to KAGE_Rec_2026-11-25.mp4 (124.8 MB written).",
+      "x": 32,
+      "y": 128,
+      "width": 720,
+      "parent": 155,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 14,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "BtnStopRec",
+      "x": 32,
+      "y": 186,
+      "width": 210,
+      "height": 46,
+      "parent": 155,
+      "props": {
+        "fill": "#C92A32",
+        "cornerRadius": 6
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BtnStopTxt",
+      "characters": "STOP RECORDING  Alt+R",
+      "x": 56,
+      "y": 201,
+      "parent": 155,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#FFFFFF"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "BtnSaveAlso",
+      "x": 256,
+      "y": 186,
+      "width": 184,
+      "height": 46,
+      "parent": 155,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 23
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BtnSaveAlsoTxt",
+      "characters": "Save Replay  Alt+C",
+      "x": 284,
+      "y": 201,
+      "parent": 155,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "03-Library-Trimmer",
+      "x": 2720,
+      "y": 0,
+      "width": 1280,
+      "height": 820,
+      "parent": 27,
+      "props": {
+        "fill": "#0A0908",
+        "clip": true
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TitleBar",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 36,
+      "parent": 164,
+      "props": {
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TitleDivider",
+      "x": 0,
+      "y": 35,
+      "width": 1280,
+      "height": 1,
+      "parent": 165,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "MiniK",
+      "x": 16,
+      "y": 10,
+      "width": 14,
+      "height": 16,
+      "parent": 165,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "AppTitle",
+      "characters": "KAGE Studio",
+      "x": 38,
+      "y": 10,
+      "parent": 165,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "EncoderBadge",
+      "characters": "NVENC H.264  1080p60  GAME MODE",
+      "x": 138,
+      "y": 11,
+      "parent": 165,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "WinCtrls",
+      "characters": "Pin    _    []    x",
+      "x": 1164,
+      "y": 10,
+      "parent": 165,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "Sidebar",
+      "x": 0,
+      "y": 36,
+      "width": 220,
+      "height": 720,
+      "parent": 164,
+      "props": {
+        "fill": "#0D0B0A"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "SideBorder",
+      "x": 219,
+      "y": 0,
+      "width": 1,
+      "height": 720,
+      "parent": 171,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BrandHeader",
+      "characters": "KAGE",
+      "x": 24,
+      "y": 24,
+      "parent": 171,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 28,
+        "fill": "#F3ECE4",
+        "letterSpacing": 4
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BrandVer",
+      "characters": "v2.0  LOCAL ONLY",
+      "x": 25,
+      "y": 60,
+      "parent": 171,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 10,
+        "fill": "#94897E",
+        "letterSpacing": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Studio",
+      "characters": "Studio",
+      "x": 32,
+      "y": 118,
+      "parent": 171,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "NavActive-Library",
+      "x": 14,
+      "y": 152,
+      "width": 192,
+      "height": 36,
+      "parent": 171,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "NavIndicator-Library",
+      "x": 14,
+      "y": 160,
+      "width": 3,
+      "height": 20,
+      "parent": 171,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 2
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Library",
+      "characters": "Library",
+      "x": 32,
+      "y": 162,
+      "parent": 171,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Profiles",
+      "characters": "Profiles",
+      "x": 32,
+      "y": 206,
+      "parent": 171,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Telemetry",
+      "characters": "Telemetry",
+      "x": 32,
+      "y": 250,
+      "parent": 171,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Settings",
+      "characters": "Settings",
+      "x": 32,
+      "y": 294,
+      "parent": 171,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "HardwareCard",
+      "x": 14,
+      "y": 608,
+      "width": 192,
+      "height": 92,
+      "parent": 171,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwTitle",
+      "characters": "NVIDIA NVENC",
+      "x": 14,
+      "y": 12,
+      "parent": 182,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwRam",
+      "characters": "Process RSS: 114 MB",
+      "x": 14,
+      "y": 34,
+      "parent": 182,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwRing",
+      "characters": "Ring Buffer: 88.2 MB",
+      "x": 14,
+      "y": 54,
+      "parent": 182,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TransportBar",
+      "x": 0,
+      "y": 756,
+      "width": 1280,
+      "height": 64,
+      "parent": 164,
+      "props": {
+        "fill": "#12100E"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TransDivider",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 1,
+      "parent": 186,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "TransDot",
+      "x": 24,
+      "y": 27,
+      "width": 10,
+      "height": 10,
+      "parent": 186,
+      "props": {
+        "fill": "#4ADE80"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TransState",
+      "characters": "Buffer Armed  58.4 / 60s",
+      "x": 44,
+      "y": 23,
+      "parent": 186,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "ProgressBg",
+      "x": 236,
+      "y": 29,
+      "width": 220,
+      "height": 6,
+      "parent": 186,
+      "props": {
+        "fill": "#282320",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "ProgressFill",
+      "x": 236,
+      "y": 29,
+      "width": 206,
+      "height": 6,
+      "parent": 186,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TBtnSave",
+      "x": 520,
+      "y": 14,
+      "width": 148,
+      "height": 36,
+      "parent": 186,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 18
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TBtnSaveTxt",
+      "characters": "Save Replay  Alt+C",
+      "x": 538,
+      "y": 24,
+      "parent": 186,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TBtnRec",
+      "x": 680,
+      "y": 14,
+      "width": 152,
+      "height": 36,
+      "parent": 186,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 6,
+        "stroke": "#C92A32",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TBtnRecTxt",
+      "characters": "REC  Alt+R",
+      "x": 722,
+      "y": 24,
+      "parent": 186,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#FF6B6F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TransAudio",
+      "characters": "Game 100%   |   Mic Off   |   Folder",
+      "x": 1030,
+      "y": 24,
+      "parent": 186,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "MainLib",
+      "x": 220,
+      "y": 36,
+      "width": 1060,
+      "height": 720,
+      "parent": 164,
+      "props": {
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "LibTitle",
+      "characters": "Clip Library",
+      "x": 28,
+      "y": 24,
+      "parent": 197,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 34,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "LibCardBg1",
+      "x": 28,
+      "y": 84,
+      "width": 320,
+      "height": 220,
+      "parent": 197,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 12
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "LibCardBg2",
+      "x": 368,
+      "y": 84,
+      "width": 320,
+      "height": 220,
+      "parent": 197,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 12
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "LibCardBg3",
+      "x": 708,
+      "y": 84,
+      "width": 320,
+      "height": 220,
+      "parent": 197,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 12
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "Scrim",
+      "x": 0,
+      "y": 36,
+      "width": 1280,
+      "height": 784,
+      "parent": 164,
+      "props": {
+        "fill": "#0A0908D8"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TrimmerModal",
+      "x": 180,
+      "y": 90,
+      "width": 920,
+      "height": 640,
+      "parent": 164,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 16,
+        "stroke": "#282320",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TrimTitle",
+      "characters": "KAGE_Replay_2026-11-25_13-24-08.mp4",
+      "x": 28,
+      "y": 22,
+      "parent": 203,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 15,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TrimClose",
+      "characters": "Esc  Close",
+      "x": 828,
+      "y": 22,
+      "parent": 203,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "VideoCanvas",
+      "x": 28,
+      "y": 64,
+      "width": 864,
+      "height": 420,
+      "parent": 203,
+      "props": {
+        "fill": "#050504",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "VideoCenter",
+      "characters": "LOSSLESS KEYFRAME PREVIEW",
+      "x": 342,
+      "y": 264,
+      "parent": 203,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#94897E",
+        "letterSpacing": 1.5
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TimelineTrack",
+      "x": 28,
+      "y": 506,
+      "width": 864,
+      "height": 10,
+      "parent": 203,
+      "props": {
+        "fill": "#282320",
+        "cornerRadius": 5
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TimelineActive",
+      "x": 180,
+      "y": 506,
+      "width": 460,
+      "height": 10,
+      "parent": 203,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 5
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "BtnTrimSave",
+      "x": 28,
+      "y": 556,
+      "width": 170,
+      "height": 42,
+      "parent": 203,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 21
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BtnTrimTxt",
+      "characters": "Save Lossless Trim",
+      "x": 48,
+      "y": 570,
+      "parent": 203,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "BtnSplit",
+      "x": 212,
+      "y": 556,
+      "width": 148,
+      "height": 42,
+      "parent": 203,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#6E655E",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BtnSplitTxt",
+      "characters": "Split at Playhead",
+      "x": 232,
+      "y": 570,
+      "parent": 203,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "04-Settings-Hotkeys",
+      "x": 4080,
+      "y": 0,
+      "width": 1280,
+      "height": 820,
+      "parent": 27,
+      "props": {
+        "fill": "#0A0908",
+        "clip": true
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TitleBar",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 36,
+      "parent": 214,
+      "props": {
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TitleDivider",
+      "x": 0,
+      "y": 35,
+      "width": 1280,
+      "height": 1,
+      "parent": 215,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "MiniK",
+      "x": 16,
+      "y": 10,
+      "width": 14,
+      "height": 16,
+      "parent": 215,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "AppTitle",
+      "characters": "KAGE Studio",
+      "x": 38,
+      "y": 10,
+      "parent": 215,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "EncoderBadge",
+      "characters": "NVENC H.264  1080p60  GAME MODE",
+      "x": 138,
+      "y": 11,
+      "parent": 215,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "WinCtrls",
+      "characters": "Pin    _    []    x",
+      "x": 1164,
+      "y": 10,
+      "parent": 215,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "Sidebar",
+      "x": 0,
+      "y": 36,
+      "width": 220,
+      "height": 720,
+      "parent": 214,
+      "props": {
+        "fill": "#0D0B0A"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "SideBorder",
+      "x": 219,
+      "y": 0,
+      "width": 1,
+      "height": 720,
+      "parent": 221,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BrandHeader",
+      "characters": "KAGE",
+      "x": 24,
+      "y": 24,
+      "parent": 221,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 28,
+        "fill": "#F3ECE4",
+        "letterSpacing": 4
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "BrandVer",
+      "characters": "v2.0  LOCAL ONLY",
+      "x": 25,
+      "y": 60,
+      "parent": 221,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 10,
+        "fill": "#94897E",
+        "letterSpacing": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Studio",
+      "characters": "Studio",
+      "x": 32,
+      "y": 118,
+      "parent": 221,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Library",
+      "characters": "Library",
+      "x": 32,
+      "y": 162,
+      "parent": 221,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Profiles",
+      "characters": "Profiles",
+      "x": 32,
+      "y": 206,
+      "parent": 221,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Telemetry",
+      "characters": "Telemetry",
+      "x": 32,
+      "y": 250,
+      "parent": 221,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "NavActive-Settings",
+      "x": 14,
+      "y": 284,
+      "width": 192,
+      "height": 36,
+      "parent": 221,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "NavIndicator-Settings",
+      "x": 14,
+      "y": 292,
+      "width": 3,
+      "height": 20,
+      "parent": 221,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 2
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "NavText-Settings",
+      "characters": "Settings",
+      "x": 32,
+      "y": 294,
+      "parent": 221,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "HardwareCard",
+      "x": 14,
+      "y": 608,
+      "width": 192,
+      "height": 92,
+      "parent": 221,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 10,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwTitle",
+      "characters": "NVIDIA NVENC",
+      "x": 14,
+      "y": 12,
+      "parent": 232,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwRam",
+      "characters": "Process RSS: 114 MB",
+      "x": 14,
+      "y": 34,
+      "parent": 232,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HwRing",
+      "characters": "Ring Buffer: 88.2 MB",
+      "x": 14,
+      "y": 54,
+      "parent": 232,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 11,
+        "fill": "#94897E"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "TransportBar",
+      "x": 0,
+      "y": 756,
+      "width": 1280,
+      "height": 64,
+      "parent": 214,
+      "props": {
+        "fill": "#12100E"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TransDivider",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 1,
+      "parent": 236,
+      "props": {
+        "fill": "#282320"
+      }
+    }
+  },
+  {
+    "command": "shape.ellipse",
+    "params": {
+      "name": "TransDot",
+      "x": 24,
+      "y": 27,
+      "width": 10,
+      "height": 10,
+      "parent": 236,
+      "props": {
+        "fill": "#4ADE80"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TransState",
+      "characters": "Buffer Armed  58.4 / 60s",
+      "x": 44,
+      "y": 23,
+      "parent": 236,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "ProgressBg",
+      "x": 236,
+      "y": 29,
+      "width": 220,
+      "height": 6,
+      "parent": 236,
+      "props": {
+        "fill": "#282320",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "ProgressFill",
+      "x": 236,
+      "y": 29,
+      "width": 206,
+      "height": 6,
+      "parent": 236,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 3
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TBtnSave",
+      "x": 520,
+      "y": 14,
+      "width": 148,
+      "height": 36,
+      "parent": 236,
+      "props": {
+        "fill": "#E6C29F",
+        "cornerRadius": 18
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TBtnSaveTxt",
+      "characters": "Save Replay  Alt+C",
+      "x": 538,
+      "y": 24,
+      "parent": 236,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "TBtnRec",
+      "x": 680,
+      "y": 14,
+      "width": 152,
+      "height": 36,
+      "parent": 236,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 6,
+        "stroke": "#C92A32",
+        "strokeWeight": 1.5
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TBtnRecTxt",
+      "characters": "REC  Alt+R",
+      "x": 722,
+      "y": 24,
+      "parent": 236,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#FF6B6F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "TransAudio",
+      "characters": "Game 100%   |   Mic Off   |   Folder",
+      "x": 1030,
+      "y": 24,
+      "parent": 236,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 12,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "MainSettings",
+      "x": 220,
+      "y": 36,
+      "width": 1060,
+      "height": 720,
+      "parent": 214,
+      "props": {
+        "fill": "#0A0908"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "SetTitle",
+      "characters": "Studio Settings",
+      "x": 28,
+      "y": 24,
+      "parent": 247,
+      "props": {
+        "fontFamily": "Playfair Display",
+        "fontSize": 34,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "HotkeysPanel",
+      "x": 28,
+      "y": 88,
+      "width": 488,
+      "height": 290,
+      "parent": 247,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 14,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HkHeader",
+      "characters": "Global Shortcuts",
+      "x": 24,
+      "y": 22,
+      "parent": 249,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 16,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HkLbl-0",
+      "characters": "Save Instant Replay",
+      "x": 24,
+      "y": 84,
+      "parent": 249,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "HkBox-0",
+      "x": 300,
+      "y": 74,
+      "width": 164,
+      "height": 38,
+      "parent": 249,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#6E655E",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HkKey-0",
+      "characters": "Alt+C",
+      "x": 332,
+      "y": 85,
+      "parent": 249,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HkLbl-1",
+      "characters": "Start / Stop Recording",
+      "x": 24,
+      "y": 154,
+      "parent": 249,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "HkBox-1",
+      "x": 300,
+      "y": 144,
+      "width": 164,
+      "height": 38,
+      "parent": 249,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#6E655E",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HkKey-1",
+      "characters": "Alt+R",
+      "x": 332,
+      "y": 155,
+      "parent": 249,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HkLbl-2",
+      "characters": "Arm / Disarm Buffer",
+      "x": 24,
+      "y": 224,
+      "parent": 249,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "shape.rectangle",
+    "params": {
+      "name": "HkBox-2",
+      "x": 300,
+      "y": 214,
+      "width": 164,
+      "height": 38,
+      "parent": 249,
+      "props": {
+        "fill": "#1A1715",
+        "cornerRadius": 8,
+        "stroke": "#6E655E",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "HkKey-2",
+      "characters": "Alt+Shift+C",
+      "x": 332,
+      "y": 225,
+      "parent": 249,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#E6C29F"
+      }
+    }
+  },
+  {
+    "command": "frame.create",
+    "params": {
+      "name": "StoragePanel",
+      "x": 540,
+      "y": 88,
+      "width": 492,
+      "height": 290,
+      "parent": 247,
+      "props": {
+        "fill": "#12100E",
+        "cornerRadius": 14,
+        "stroke": "#282320",
+        "strokeWeight": 1
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "StorHeader",
+      "characters": "Storage & Performance",
+      "x": 24,
+      "y": 22,
+      "parent": 260,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 16,
+        "fill": "#F3ECE4"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "StorPath",
+      "characters": "Output Folder: %USERPROFILE%\\Videos\\KAGE",
+      "x": 24,
+      "y": 76,
+      "parent": 260,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "StorGameMode",
+      "characters": "Game Mode: ON (1080p60 cap, speed-first MFT)",
+      "x": 24,
+      "y": 120,
+      "parent": 260,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  },
+  {
+    "command": "text.create",
+    "params": {
+      "name": "StorPrivacy",
+      "characters": "Privacy Gate: Auto-pause when no game is focused",
+      "x": 24,
+      "y": 164,
+      "parent": 260,
+      "props": {
+        "fontFamily": "Inter",
+        "fontSize": 13,
+        "fill": "#B5AA9F"
+      }
+    }
+  }
+]
