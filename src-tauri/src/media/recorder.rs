@@ -4443,6 +4443,7 @@ mod aspect_ratio_tests {
 mod win_gpu_tests {
     use super::win::{ColorConverter, HardwareEncoder, MfSession};
     use super::*;
+    use windows::core::Interface;
     use windows::Win32::Foundation::HMODULE;
     use windows::Win32::Graphics::Direct3D::{
         D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
@@ -4451,12 +4452,15 @@ mod win_gpu_tests {
     use windows::Win32::Graphics::Dxgi::Common::*;
     use windows::Win32::Graphics::Dxgi::*;
 
-    fn create_test_d3d11() -> (ID3D11Device, ID3D11DeviceContext, String, u64) {
+    fn create_test_d3d11() -> Option<(ID3D11Device, ID3D11DeviceContext, String, u64)> {
         unsafe {
-            let factory: IDXGIFactory1 = CreateDXGIFactory1().expect("DXGI factory");
+            let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
             let mut idx = 0u32;
             while let Ok(adapter) = factory.EnumAdapters1(idx) {
-                let desc = adapter.GetDesc1().expect("adapter desc");
+                let Ok(desc) = adapter.GetDesc1() else {
+                    idx += 1;
+                    continue;
+                };
                 if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0 {
                     idx += 1;
                     continue;
@@ -4478,19 +4482,23 @@ mod win_gpu_tests {
                 )
                 .is_ok()
                 {
-                    let name = String::from_utf16_lossy(
-                        &desc.Description[..desc
-                            .Description
-                            .iter()
-                            .position(|&c| c == 0)
-                            .unwrap_or(desc.Description.len())],
-                    );
-                    let vram_mb = (desc.DedicatedVideoMemory / (1024 * 1024)) as u64;
-                    return (device.unwrap(), context.unwrap(), name, vram_mb);
+                    if let (Some(dev), Some(ctx)) = (device, context) {
+                        if dev.cast::<ID3D11VideoDevice>().is_ok() {
+                            let name = String::from_utf16_lossy(
+                                &desc.Description[..desc
+                                    .Description
+                                    .iter()
+                                    .position(|&c| c == 0)
+                                    .unwrap_or(desc.Description.len())],
+                            );
+                            let vram_mb = (desc.DedicatedVideoMemory / (1024 * 1024)) as u64;
+                            return Some((dev, ctx, name, vram_mb));
+                        }
+                    }
                 }
                 idx += 1;
             }
-            panic!("no hardware D3D11 adapter found");
+            None
         }
     }
 
@@ -4521,8 +4529,10 @@ mod win_gpu_tests {
 
     #[test]
     fn color_converter_handles_all_aspect_ratios_and_rapid_resolution_switches() {
+        let Some((device, context, adapter_name, vram_mb)) = create_test_d3d11() else {
+            return;
+        };
         let _mf = MfSession::new().expect("MF startup");
-        let (device, context, adapter_name, vram_mb) = create_test_d3d11();
 
         let mut converter = ColorConverter::new(
             &device,
