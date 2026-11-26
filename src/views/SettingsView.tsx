@@ -608,7 +608,7 @@ export function SettingsView({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#282320] pt-3 text-xs text-[#94897E]">
-            <span>KAGE Studio v2.0.1</span>
+            <span>KAGE Studio v2.0.2</span>
             <span>Local capture engine without cloud uploads or telemetry.</span>
           </div>
         </div>

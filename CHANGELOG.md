@@ -2,6 +2,16 @@
 
 All notable changes to **KAGE Studio** (formerly ClipFlow) are documented here. The project follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
+## [2.0.2] - 2026-11-26
+
+### Fixed
+
+- **Alt+Tab resolution-switch capture loss & universal aspect ratio support**:
+  - Updated `ColorConverter::convert()` in `recorder.rs` to inspect `ID3D11Texture2D::GetDesc()` on every frame and call `ensure_source()` whenever source width, height, pixel format, or rotation changes, eliminating silent D3D11 `CopyResource` no-ops across fullscreen Alt+Tab transitions.
+  - Added aspect-preserving framing (`compute_aspect_fit_rect` and `compute_canvas_dimensions`) via `ID3D11VideoProcessor` source/dest/target rects and black background fill with even NV12 coordinates across all aspect ratios (`16:9`, `16:10`, `4:3`, `5:4`, `21:9`, `32:9`, `9:16`, and custom/odd sizes) plus display rotation handling.
+  - Upgraded `GraphicsStack` to use `IDXGIOutput5::DuplicateOutput1` with fallback to `DuplicateOutput`, handle mode-switch DXGI errors (`DXGI_ERROR_INVALID_CALL`, `DXGI_ERROR_SESSION_DISCONNECTED`, `DXGI_ERROR_NOT_CURRENTLY_AVAILABLE`, `E_ACCESSDENIED`, `E_UNEXPECTED`), detect stale DXGI factories (`!IsCurrent()`), GDI `EnumDisplaySettingsW` mode changes, and post-Alt+Tab stall heuristics, and reacquire desktop duplication seamlessly on the existing `ID3D11Device` without interrupting the replay ring or active `Alt+R` recordings.
+  - Ignored cursor-only DXGI updates without image changes, added 16-aligned encoder fallback and stalled-encoder recovery, and added unit + hardware D3D11 integration tests.
+
 ## [2.0.1] - 2026-11-25
 
 ### Fixed

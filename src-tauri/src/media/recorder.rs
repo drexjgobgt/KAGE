@@ -613,6 +613,79 @@ fn ring_cap_mb(buffer_seconds: u32, bitrate_kbps: u32) -> usize {
     ((nominal as f64 * 1.6) as usize).clamp(24, 1536)
 }
 
+/// Computes even encoder canvas dimensions (`(w, h)`) from the source capture
+/// size, optional explicit override, and Game Mode `max_height` cap.
+pub(crate) fn compute_canvas_dimensions(
+    src_w: u32,
+    src_h: u32,
+    cfg_w: u32,
+    cfg_h: u32,
+    max_height: u32,
+) -> (u32, u32) {
+    let base_w = if cfg_w > 0 {
+        cfg_w
+    } else if src_w > 0 {
+        src_w
+    } else {
+        1920
+    };
+    let base_h = if cfg_h > 0 {
+        cfg_h
+    } else if src_h > 0 {
+        src_h
+    } else {
+        1080
+    };
+    let mut dst_w = (base_w & !1).max(16);
+    let mut dst_h = (base_h & !1).max(16);
+
+    if max_height > 0 && max_height < dst_h && cfg_w == 0 && cfg_h == 0 {
+        let h = (max_height & !1).max(16);
+        let scaled_w = ((base_w as u64 * h as u64 + base_h.max(1) as u64 / 2)
+            / base_h.max(1) as u64) as u32;
+        dst_w = ((scaled_w + 1) & !1).max(16);
+        dst_h = h;
+    }
+
+    (dst_w, dst_h)
+}
+
+/// Computes an aspect-preserving `(left, top, right, bottom)` destination
+/// rectangle inside `(dst_w, dst_h)` with even coordinates for NV12 chroma.
+#[cfg_attr(any(not(windows), feature = "headless-sim"), allow(dead_code))]
+pub(crate) fn compute_aspect_fit_rect(
+    src_w: u32,
+    src_h: u32,
+    dst_w: u32,
+    dst_h: u32,
+) -> (i32, i32, i32, i32) {
+    if src_w == 0 || src_h == 0 || dst_w < 2 || dst_h < 2 {
+        return (0, 0, dst_w as i32, dst_h as i32);
+    }
+
+    let lhs = src_w as u64 * dst_h as u64;
+    let rhs = dst_w as u64 * src_h as u64;
+    if lhs == rhs {
+        return (0, 0, dst_w as i32, dst_h as i32);
+    }
+
+    if lhs < rhs {
+        // Source is narrower/taller than canvas: fit height, pillarbox left/right.
+        let raw_w = ((src_w as u64 * dst_h as u64) + (src_h as u64 / 2)) / src_h as u64;
+        let fit_w = ((raw_w as u32 + 1) & !1).clamp(2, dst_w);
+        let left = ((dst_w - fit_w) / 2) & !1;
+        let right = (left + fit_w).min(dst_w);
+        (left as i32, 0, right as i32, dst_h as i32)
+    } else {
+        // Source is wider/shorter than canvas: fit width, letterbox top/bottom.
+        let raw_h = ((src_h as u64 * dst_w as u64) + (src_w as u64 / 2)) / src_w as u64;
+        let fit_h = ((raw_h as u32 + 1) & !1).clamp(2, dst_h);
+        let top = ((dst_h - fit_h) / 2) & !1;
+        let bottom = (top + fit_h).min(dst_h);
+        (0, top as i32, dst_w as i32, bottom as i32)
+    }
+}
+
 pub fn is_integrated_gpu(adapter_name: &str, vram_mb: u64) -> bool {
     if vram_mb > 0 && vram_mb < 2048 {
         return true;
@@ -1333,13 +1406,18 @@ mod win {
     use super::*;
     use std::os::windows::ffi::OsStrExt;
     use windows::core::{Interface, PCWSTR, PWSTR};
-    use windows::Win32::Foundation::{E_UNEXPECTED, HMODULE, TRUE};
+    use windows::Win32::Foundation::{
+        E_ACCESSDENIED, E_UNEXPECTED, FALSE, HMODULE, LUID, RECT, TRUE,
+    };
     use windows::Win32::Graphics::Direct3D::{
         D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
     };
     use windows::Win32::Graphics::Direct3D11::*;
     use windows::Win32::Graphics::Dxgi::Common::*;
     use windows::Win32::Graphics::Dxgi::*;
+    use windows::Win32::Graphics::Gdi::{
+        EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS,
+    };
     use windows::Win32::Media::MediaFoundation::*;
     use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
     use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
@@ -1349,19 +1427,136 @@ mod win {
         GetCurrentProcess, GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
         THREAD_PRIORITY_NORMAL,
     };
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
 
     pub(super) fn hr(e: windows::core::Error) -> RecorderError {
         RecorderError::Win(format!("{} (0x{:08X})", e.message(), e.code().0 as u32))
     }
 
-    pub(super) fn is_device_lost(e: &windows::core::Error) -> bool {
-        let c = e.code();
-        c == DXGI_ERROR_DEVICE_REMOVED
-            || c == DXGI_ERROR_DEVICE_RESET
-            || c == DXGI_ERROR_ACCESS_LOST
-            || c == DXGI_ERROR_DEVICE_HUNG
-            || c == DXGI_ERROR_DRIVER_INTERNAL_ERROR
-            || c == E_UNEXPECTED
+    pub(super) fn is_device_fatal(code: windows::core::HRESULT) -> bool {
+        code == DXGI_ERROR_DEVICE_REMOVED
+            || code == DXGI_ERROR_DEVICE_RESET
+            || code == DXGI_ERROR_DEVICE_HUNG
+            || code == DXGI_ERROR_DRIVER_INTERNAL_ERROR
+    }
+
+    pub(super) fn is_duplication_lost(code: windows::core::HRESULT) -> bool {
+        code == DXGI_ERROR_ACCESS_LOST
+            || code == DXGI_ERROR_INVALID_CALL
+            || code == DXGI_ERROR_SESSION_DISCONNECTED
+            || code == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE
+            || code == E_ACCESSDENIED
+            || code == E_UNEXPECTED
+    }
+
+    pub(super) fn query_display_mode(device_name: &[u16; 32]) -> Option<(u32, u32, u32)> {
+        unsafe {
+            let mut dm = DEVMODEW {
+                dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+                ..Default::default()
+            };
+            if EnumDisplaySettingsW(PCWSTR(device_name.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm)
+                .as_bool()
+                && dm.dmPelsWidth > 0
+                && dm.dmPelsHeight > 0
+            {
+                Some((
+                    dm.dmPelsWidth,
+                    dm.dmPelsHeight,
+                    dm.Anonymous1.Anonymous2.dmDisplayOrientation.0,
+                ))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub(super) fn current_fg_hwnd() -> isize {
+        unsafe { GetForegroundWindow().0 as isize }
+    }
+
+    pub(super) fn is_foreground_fullscreen(monitor_rect: &RECT) -> bool {
+        let mon_w = monitor_rect.right - monitor_rect.left;
+        let mon_h = monitor_rect.bottom - monitor_rect.top;
+        if mon_w <= 0 || mon_h <= 0 {
+            return false;
+        }
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.is_invalid() {
+                return false;
+            }
+            let mut rect = RECT::default();
+            if GetWindowRect(hwnd, &mut rect).is_err() {
+                return false;
+            }
+            const TOL: i32 = 8;
+            rect.left <= monitor_rect.left + TOL
+                && rect.top <= monitor_rect.top + TOL
+                && rect.right >= monitor_rect.right - TOL
+                && rect.bottom >= monitor_rect.bottom - TOL
+        }
+    }
+
+    pub(super) fn normalize_vp_input_format(fmt: DXGI_FORMAT) -> DXGI_FORMAT {
+        if fmt == DXGI_FORMAT_UNKNOWN || fmt == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB {
+            DXGI_FORMAT_B8G8R8A8_UNORM
+        } else if fmt == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB {
+            DXGI_FORMAT_R8G8B8A8_UNORM
+        } else {
+            fmt
+        }
+    }
+
+    unsafe fn open_duplication(
+        device: &ID3D11Device,
+        output: &IDXGIOutput,
+    ) -> windows::core::Result<IDXGIOutputDuplication> {
+        if let Ok(output5) = output.cast::<IDXGIOutput5>() {
+            let formats = [
+                DXGI_FORMAT_B8G8R8A8_UNORM,
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                DXGI_FORMAT_R10G10B10A2_UNORM,
+                DXGI_FORMAT_R16G16B16A16_FLOAT,
+            ];
+            if let Ok(dupl) = output5.DuplicateOutput1(device, 0, &formats) {
+                return Ok(dupl);
+            }
+        }
+        let output1: IDXGIOutput1 = output.cast()?;
+        output1.DuplicateOutput(device)
+    }
+
+    fn resolve_dupl_dimensions(
+        dupl: &IDXGIOutputDuplication,
+        odesc: &DXGI_OUTPUT_DESC,
+    ) -> (u32, u32, DXGI_FORMAT, DXGI_MODE_ROTATION, u32, u32, u32) {
+        let desc = unsafe { dupl.GetDesc() };
+        let gdi_mode = query_display_mode(&odesc.DeviceName);
+        let rect_w = (odesc.DesktopCoordinates.right - odesc.DesktopCoordinates.left).max(0) as u32;
+        let rect_h = (odesc.DesktopCoordinates.bottom - odesc.DesktopCoordinates.top).max(0) as u32;
+
+        let mut src_w = desc.ModeDesc.Width;
+        let mut src_h = desc.ModeDesc.Height;
+        if src_w == 0 || src_h == 0 {
+            if let Some((gw, gh, _)) = gdi_mode {
+                src_w = gw;
+                src_h = gh;
+            } else {
+                src_w = rect_w;
+                src_h = rect_h;
+            }
+        }
+        let (mode_w, mode_h, mode_ori) = gdi_mode.unwrap_or((src_w, src_h, 0));
+        (
+            src_w,
+            src_h,
+            normalize_vp_input_format(desc.ModeDesc.Format),
+            desc.Rotation,
+            mode_w,
+            mode_h,
+            mode_ori,
+        )
     }
 
     pub(super) fn free_disk_bytes(path: &Path) -> Option<u64> {
@@ -1441,15 +1636,29 @@ mod win {
         }
     }
 
+    pub(super) enum ReacquireOutcome {
+        Reacquired,
+        TransientRetry(String),
+        NeedFullRebuild(String),
+    }
+
     pub(super) struct GraphicsStack {
+        pub factory: IDXGIFactory1,
         pub device: ID3D11Device,
         pub context: ID3D11DeviceContext,
-        pub duplication: IDXGIOutputDuplication,
+        pub duplication: Option<IDXGIOutputDuplication>,
+        pub adapter_luid: LUID,
+        pub device_name: [u16; 32],
+        pub monitor_rect: RECT,
         pub adapter_name: String,
         pub vram_mb: u64,
         pub src_width: u32,
         pub src_height: u32,
         pub src_format: DXGI_FORMAT,
+        pub src_rotation: DXGI_MODE_ROTATION,
+        pub mode_width: u32,
+        pub mode_height: u32,
+        pub mode_orientation: u32,
     }
 
     impl GraphicsStack {
@@ -1475,7 +1684,7 @@ mod win {
                             Err(_) => break,
                         };
                         if flat == monitor_index {
-                            return Self::build(&adapter, &adesc, &output);
+                            return Self::build(factory, &adapter, &adesc, &output);
                         }
                         flat += 1;
                         output_idx += 1;
@@ -1487,6 +1696,7 @@ mod win {
         }
 
         unsafe fn build(
+            factory: IDXGIFactory1,
             adapter: &IDXGIAdapter1,
             adesc: &DXGI_ADAPTER_DESC1,
             output: &IDXGIOutput,
@@ -1515,8 +1725,8 @@ mod win {
             let mt: ID3D11Multithread = device.cast().map_err(hr)?;
             let _ = mt.SetMultithreadProtected(TRUE);
 
-            let output1: IDXGIOutput1 = output.cast().map_err(hr)?;
-            let duplication = output1.DuplicateOutput(&device).map_err(|e| {
+            let odesc = output.GetDesc().map_err(hr)?;
+            let duplication = open_duplication(&device, output).map_err(|e| {
                 if e.code() == DXGI_ERROR_UNSUPPORTED {
                     RecorderError::Other(
                         "Desktop Duplication is unavailable on this output (hybrid-GPU: run KAGE on the GPU driving the display)".into(),
@@ -1526,7 +1736,9 @@ mod win {
                 }
             })?;
 
-            let desc = duplication.GetDesc();
+            let (src_width, src_height, src_format, src_rotation, mode_width, mode_height, mode_orientation) =
+                resolve_dupl_dimensions(&duplication, &odesc);
+
             let adapter_name = String::from_utf16_lossy(
                 &adesc.Description[..adesc
                     .Description
@@ -1535,20 +1747,129 @@ mod win {
                     .unwrap_or(adesc.Description.len())],
             );
 
-            let _ = adapter;
             Ok(Self {
-                src_width: desc.ModeDesc.Width,
-                src_height: desc.ModeDesc.Height,
-                src_format: desc.ModeDesc.Format,
+                factory,
+                src_width,
+                src_height,
+                src_format,
+                src_rotation,
+                mode_width,
+                mode_height,
+                mode_orientation,
+                adapter_luid: adesc.AdapterLuid,
+                device_name: odesc.DeviceName,
+                monitor_rect: odesc.DesktopCoordinates,
                 device,
                 context,
-                duplication,
+                duplication: Some(duplication),
                 adapter_name,
                 vram_mb: (adesc.DedicatedVideoMemory / (1024 * 1024)) as u64,
             })
         }
 
+        /// Drops any existing `IDXGIOutputDuplication` and attempts to reacquire
+        /// desktop duplication on the existing `ID3D11Device` so resolution / Alt+Tab
+        /// switches preserve `HardwareEncoder`, replay ring generation, and active `Alt+R` streams.
+        pub fn reacquire_duplication_same_device(&mut self, monitor_index: u32) -> ReacquireOutcome {
+            self.duplication = None;
+            unsafe {
+                if let Err(e) = self.device.GetDeviceRemovedReason() {
+                    return ReacquireOutcome::NeedFullRebuild(format!(
+                        "device removed ({})",
+                        hr(e)
+                    ));
+                }
+
+                let factory: IDXGIFactory1 = match CreateDXGIFactory1() {
+                    Ok(f) => f,
+                    Err(e) => return ReacquireOutcome::TransientRetry(hr(e).to_string()),
+                };
+
+                let mut flat = 0u32;
+                let mut adapter_idx = 0u32;
+                let mut fallback_target: Option<(LUID, IDXGIOutput, DXGI_OUTPUT_DESC)> = None;
+                let mut matched_target: Option<(LUID, IDXGIOutput, DXGI_OUTPUT_DESC)> = None;
+
+                while let Ok(adapter) = factory.EnumAdapters1(adapter_idx) {
+                    let Ok(adesc) = adapter.GetDesc1() else {
+                        adapter_idx += 1;
+                        continue;
+                    };
+                    if (adesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0 {
+                        adapter_idx += 1;
+                        continue;
+                    }
+                    let mut output_idx = 0u32;
+                    while let Ok(output) = adapter.EnumOutputs(output_idx) {
+                        if let Ok(odesc) = output.GetDesc() {
+                            if odesc.DeviceName == self.device_name {
+                                matched_target = Some((adesc.AdapterLuid, output, odesc));
+                                break;
+                            }
+                            if flat == monitor_index {
+                                fallback_target = Some((adesc.AdapterLuid, output, odesc));
+                            }
+                        }
+                        flat += 1;
+                        output_idx += 1;
+                    }
+                    if matched_target.is_some() {
+                        break;
+                    }
+                    adapter_idx += 1;
+                }
+
+                let Some((luid, output, odesc)) = matched_target.or(fallback_target) else {
+                    return ReacquireOutcome::TransientRetry(format!(
+                        "monitor {monitor_index} temporarily unavailable during mode switch"
+                    ));
+                };
+
+                if (luid.LowPart, luid.HighPart)
+                    != (self.adapter_luid.LowPart, self.adapter_luid.HighPart)
+                {
+                    return ReacquireOutcome::NeedFullRebuild(
+                        "display moved to a different GPU adapter".into(),
+                    );
+                }
+
+                match open_duplication(&self.device, &output) {
+                    Ok(dupl) => {
+                        let (
+                            src_width,
+                            src_height,
+                            src_format,
+                            src_rotation,
+                            mode_width,
+                            mode_height,
+                            mode_orientation,
+                        ) = resolve_dupl_dimensions(&dupl, &odesc);
+                        self.factory = factory;
+                        self.device_name = odesc.DeviceName;
+                        self.monitor_rect = odesc.DesktopCoordinates;
+                        self.src_width = src_width;
+                        self.src_height = src_height;
+                        self.src_format = src_format;
+                        self.src_rotation = src_rotation;
+                        self.mode_width = mode_width;
+                        self.mode_height = mode_height;
+                        self.mode_orientation = mode_orientation;
+                        self.duplication = Some(dupl);
+                        ReacquireOutcome::Reacquired
+                    }
+                    Err(e) => {
+                        if is_device_fatal(e.code()) {
+                            ReacquireOutcome::NeedFullRebuild(hr(e).to_string())
+                        } else {
+                            ReacquireOutcome::TransientRetry(hr(e).to_string())
+                        }
+                    }
+                }
+            }
+        }
+
         pub fn reacquire_duplication(&mut self, monitor_index: u32) -> RResult<()> {
+            self.duplication = None;
             let rebuilt = Self::create(monitor_index)?;
             *self = rebuilt;
             Ok(())
@@ -1557,6 +1878,7 @@ mod win {
 
     #[allow(dead_code)]
     pub(super) struct ColorConverter {
+        device: ID3D11Device,
         vdevice: ID3D11VideoDevice,
         vcontext: ID3D11VideoContext,
         context: ID3D11DeviceContext,
@@ -1568,8 +1890,12 @@ mod win {
         cur_slot: usize,
         src_w: u32,
         src_h: u32,
-        _dst_w: u32,
-        _dst_h: u32,
+        src_format: DXGI_FORMAT,
+        src_rotation: DXGI_MODE_ROTATION,
+        dst_w: u32,
+        dst_h: u32,
+        fps: u32,
+        performance_mode: bool,
     }
 
     impl ColorConverter {
@@ -1579,11 +1905,16 @@ mod win {
             src_w: u32,
             src_h: u32,
             src_format: DXGI_FORMAT,
+            src_rotation: DXGI_MODE_ROTATION,
             dst_w: u32,
             dst_h: u32,
             fps: u32,
             performance_mode: bool,
         ) -> RResult<Self> {
+            let src_w = src_w.max(2);
+            let src_h = src_h.max(2);
+            let src_format = normalize_vp_input_format(src_format);
+
             unsafe {
                 let vdevice: ID3D11VideoDevice = device.cast().map_err(hr)?;
                 let vcontext: ID3D11VideoContext = context.cast().map_err(hr)?;
@@ -1627,17 +1958,73 @@ mod win {
                     0,
                     D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
                 );
+                vcontext.VideoProcessorSetStreamAutoProcessingMode(&processor, 0, FALSE);
+
+                let vp_rot = match src_rotation {
+                    DXGI_MODE_ROTATION_ROTATE90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
+                    DXGI_MODE_ROTATION_ROTATE180 => D3D11_VIDEO_PROCESSOR_ROTATION_180,
+                    DXGI_MODE_ROTATION_ROTATE270 => D3D11_VIDEO_PROCESSOR_ROTATION_270,
+                    _ => D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
+                };
+                let mut caps = D3D11_VIDEO_PROCESSOR_CAPS::default();
+                let supports_rot = enumerator.GetVideoProcessorCaps(&mut caps).is_ok()
+                    && (caps.FeatureCaps & D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION.0 as u32)
+                        != 0;
+                let (eff_w, eff_h) =
+                    if vp_rot != D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY && supports_rot {
+                        vcontext.VideoProcessorSetStreamRotation(&processor, 0, TRUE, vp_rot);
+                        if matches!(
+                            vp_rot,
+                            D3D11_VIDEO_PROCESSOR_ROTATION_90 | D3D11_VIDEO_PROCESSOR_ROTATION_270
+                        ) {
+                            (src_h, src_w)
+                        } else {
+                            (src_w, src_h)
+                        }
+                    } else {
+                        (src_w, src_h)
+                    };
+
+                let (dl, dt, dr, db) = compute_aspect_fit_rect(eff_w, eff_h, dst_w, dst_h);
+                let src_rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: src_w as i32,
+                    bottom: src_h as i32,
+                };
+                let dst_rect = RECT {
+                    left: dl,
+                    top: dt,
+                    right: dr,
+                    bottom: db,
+                };
+                let target_rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: dst_w as i32,
+                    bottom: dst_h as i32,
+                };
+                let black_bg = D3D11_VIDEO_COLOR {
+                    Anonymous: D3D11_VIDEO_COLOR_0 {
+                        RGBA: D3D11_VIDEO_COLOR_RGBA {
+                            R: 0.0,
+                            G: 0.0,
+                            B: 0.0,
+                            A: 1.0,
+                        },
+                    },
+                };
+                vcontext.VideoProcessorSetStreamSourceRect(&processor, 0, TRUE, Some(&src_rect));
+                vcontext.VideoProcessorSetStreamDestRect(&processor, 0, TRUE, Some(&dst_rect));
+                vcontext.VideoProcessorSetOutputTargetRect(&processor, TRUE, Some(&target_rect));
+                vcontext.VideoProcessorSetOutputBackgroundColor(&processor, FALSE, &black_bg);
 
                 let input_desc = D3D11_TEXTURE2D_DESC {
                     Width: src_w,
                     Height: src_h,
                     MipLevels: 1,
                     ArraySize: 1,
-                    Format: if src_format == DXGI_FORMAT_UNKNOWN {
-                        DXGI_FORMAT_B8G8R8A8_UNORM
-                    } else {
-                        src_format
-                    },
+                    Format: src_format,
                     SampleDesc: DXGI_SAMPLE_DESC {
                         Count: 1,
                         Quality: 0,
@@ -1716,6 +2103,7 @@ mod win {
                 }
 
                 Ok(Self {
+                    device: device.clone(),
                     vdevice,
                     vcontext,
                     context: context.clone(),
@@ -1727,14 +2115,69 @@ mod win {
                     cur_slot: 0,
                     src_w,
                     src_h,
-                    _dst_w: dst_w,
-                    _dst_h: dst_h,
+                    src_format,
+                    src_rotation,
+                    dst_w,
+                    dst_h,
+                    fps,
+                    performance_mode,
                 })
             }
         }
 
-        pub fn convert(&mut self, src: &ID3D11Texture2D) -> RResult<&ID3D11Texture2D> {
+        /// Rebuilds the input texture and video processor rects whenever the
+        /// captured frame resolution, pixel format, or rotation changes.
+        pub fn ensure_source(
+            &mut self,
+            src_w: u32,
+            src_h: u32,
+            src_format: DXGI_FORMAT,
+            src_rotation: DXGI_MODE_ROTATION,
+        ) -> RResult<bool> {
+            if src_w == 0 || src_h == 0 {
+                return Err(RecorderError::Other("empty capture frame dimensions".into()));
+            }
+            let norm_fmt = normalize_vp_input_format(src_format);
+            if src_w == self.src_w
+                && src_h == self.src_h
+                && norm_fmt == self.src_format
+                && src_rotation == self.src_rotation
+            {
+                return Ok(false);
+            }
+            log::info!(
+                "[kage] source mode change: {}x{} -> {}x{} (fmt={:?})",
+                self.src_w,
+                self.src_h,
+                src_w,
+                src_h,
+                norm_fmt
+            );
+            *self = Self::new(
+                &self.device,
+                &self.context,
+                src_w,
+                src_h,
+                norm_fmt,
+                src_rotation,
+                self.dst_w,
+                self.dst_h,
+                self.fps,
+                self.performance_mode,
+            )?;
+            Ok(true)
+        }
+
+        pub fn convert(
+            &mut self,
+            src: &ID3D11Texture2D,
+            src_rotation: DXGI_MODE_ROTATION,
+        ) -> RResult<&ID3D11Texture2D> {
             unsafe {
+                let mut desc = D3D11_TEXTURE2D_DESC::default();
+                src.GetDesc(&mut desc);
+                self.ensure_source(desc.Width, desc.Height, desc.Format, src_rotation)?;
+
                 self.cur_slot = (self.cur_slot + 1) % self.slots.len();
                 self.context.CopyResource(&self.input_tex, src);
 
@@ -2640,13 +3083,20 @@ mod win {
         };
 
         let mut backoff_ms = 40u64;
+        let mut locked_canvas: Option<(u32, u32)> = None;
+        let mut startup_failures = 0u32;
 
         'outer: while !shared.stop_requested.load(Ordering::Acquire) {
             let mut gfx = match GraphicsStack::create(cfg.monitor_index) {
                 Ok(g) => g,
                 Err(e) => {
+                    startup_failures += 1;
                     shared.set_state(EngineState::Recovering);
-                    shared.fail(format!("{e}"));
+                    if matches!(e, RecorderError::NoSuchMonitor(_)) || startup_failures >= 5 {
+                        shared.fail(format!("{e}"));
+                    } else {
+                        log::warn!("[kage] transient capture init failure ({startup_failures}): {e}");
+                    }
                     std::thread::sleep(Duration::from_millis(backoff_ms));
                     backoff_ms = (backoff_ms * 2).min(2_000);
                     continue 'outer;
@@ -2667,21 +3117,17 @@ mod win {
             *shared.effective_target_fps.write() = cfg.target_fps;
             *shared.effective_bitrate_kbps.write() = cfg.bitrate_kbps;
 
-            let dst_w = if cfg.width == 0 { gfx.src_width } else { cfg.width } & !1;
-            let dst_h = if cfg.height == 0 { gfx.src_height } else { cfg.height } & !1;
-            let (dst_w, dst_h) = if cfg.max_height > 0
-                && cfg.max_height < dst_h
-                && cfg.width == 0
-                && cfg.height == 0
-            {
-                let h = (cfg.max_height & !1).max(2);
-                let w = (((gfx.src_width as u64 * h as u64) / gfx.src_height.max(1) as u64)
-                    as u32)
-                    & !1;
-                (w.max(2), h.max(2))
-            } else {
-                (dst_w, dst_h)
-            };
+            let (mut dst_w, mut dst_h) = locked_canvas.unwrap_or_else(|| {
+                let dims = compute_canvas_dimensions(
+                    gfx.src_width,
+                    gfx.src_height,
+                    cfg.width,
+                    cfg.height,
+                    cfg.max_height,
+                );
+                locked_canvas = Some(dims);
+                dims
+            });
 
             let mut converter = match ColorConverter::new(
                 &gfx.device,
@@ -2689,6 +3135,7 @@ mod win {
                 gfx.src_width,
                 gfx.src_height,
                 gfx.src_format,
+                gfx.src_rotation,
                 dst_w,
                 dst_h,
                 cfg.target_fps,
@@ -2696,7 +3143,13 @@ mod win {
             ) {
                 Ok(c) => c,
                 Err(e) => {
-                    shared.fail(format!("video processor: {e}"));
+                    startup_failures += 1;
+                    shared.set_state(EngineState::Recovering);
+                    if startup_failures >= 5 {
+                        shared.fail(format!("video processor: {e}"));
+                    } else {
+                        log::warn!("[kage] transient video processor init failure ({startup_failures}): {e}");
+                    }
                     std::thread::sleep(Duration::from_millis(backoff_ms));
                     backoff_ms = (backoff_ms * 2).min(2_000);
                     continue 'outer;
@@ -2716,13 +3169,72 @@ mod win {
             ) {
                 Ok(e) => e,
                 Err(e) => {
-                    shared.fail(format!("encoder: {e}"));
-                    std::thread::sleep(Duration::from_millis(backoff_ms));
-                    backoff_ms = (backoff_ms * 2).min(2_000);
-                    continue 'outer;
+                    // Some H.264 hardware MFTs reject widths/heights not divisible by 16.
+                    if dst_w % 16 != 0 || dst_h % 16 != 0 {
+                        let aligned_w = (dst_w & !15).max(16);
+                        let aligned_h = (dst_h & !15).max(16);
+                        log::warn!(
+                            "[kage] encoder rejected {dst_w}x{dst_h} ({e}); retrying 16-aligned {aligned_w}x{aligned_h}"
+                        );
+                        dst_w = aligned_w;
+                        dst_h = aligned_h;
+                        locked_canvas = Some((dst_w, dst_h));
+                        match ColorConverter::new(
+                            &gfx.device,
+                            &gfx.context,
+                            gfx.src_width,
+                            gfx.src_height,
+                            gfx.src_format,
+                            gfx.src_rotation,
+                            dst_w,
+                            dst_h,
+                            cfg.target_fps,
+                            cfg.performance_mode,
+                        )
+                        .and_then(|c| {
+                            converter = c;
+                            HardwareEncoder::create(
+                                &gfx.device,
+                                dst_w,
+                                dst_h,
+                                cfg.target_fps,
+                                cfg.bitrate_kbps,
+                                cfg.codec,
+                                cfg.performance_mode,
+                                &gfx.adapter_name,
+                                gfx.vram_mb,
+                            )
+                        }) {
+                            Ok(enc) => enc,
+                            Err(e2) => {
+                                startup_failures += 1;
+                                shared.set_state(EngineState::Recovering);
+                                if startup_failures >= 5 {
+                                    shared.fail(format!("encoder: {e2}"));
+                                } else {
+                                    log::warn!("[kage] transient encoder init failure ({startup_failures}): {e2}");
+                                }
+                                std::thread::sleep(Duration::from_millis(backoff_ms));
+                                backoff_ms = (backoff_ms * 2).min(2_000);
+                                continue 'outer;
+                            }
+                        }
+                    } else {
+                        startup_failures += 1;
+                        shared.set_state(EngineState::Recovering);
+                        if startup_failures >= 5 {
+                            shared.fail(format!("encoder: {e}"));
+                        } else {
+                            log::warn!("[kage] transient encoder init failure ({startup_failures}): {e}");
+                        }
+                        std::thread::sleep(Duration::from_millis(backoff_ms));
+                        backoff_ms = (backoff_ms * 2).min(2_000);
+                        continue 'outer;
+                    }
                 }
             };
 
+            startup_failures = 0;
             *shared.encoder.write() = encoder.info.clone();
             *shared.dimensions.write() = encoder.dimensions();
             *fmt.lock() = Some(encoder.header.clone());
@@ -2741,6 +3253,20 @@ mod win {
             let mut fps_window = Instant::now();
             let mut fps_frames = 0u32;
             let mut packet_batch: Vec<EncodedPacket> = Vec::with_capacity(8);
+
+            let mut dupl_backoff_ms = 40u64;
+            let mut dupl_next_retry = Instant::now();
+            let mut dupl_lost_since: Option<Instant> = None;
+            let mut dupl_created_at = Instant::now();
+            let mut dupl_saw_real_frame = false;
+            let mut last_present_at = Instant::now();
+            let mut last_mode_check = Instant::now();
+            let mut last_fg_hwnd = current_fg_hwnd();
+            let mut fg_changed_at: Option<Instant> = None;
+            let mut last_proactive_reacquire = Instant::now();
+            let mut consecutive_acquire_errors = 0u32;
+            let mut consecutive_convert_errors = 0u32;
+            let mut consecutive_encode_failures = 0u32;
 
             loop {
                 if shared.stop_requested.load(Ordering::Acquire) {
@@ -2772,56 +3298,107 @@ mod win {
                     shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
                 }
 
+                let cur_fg = current_fg_hwnd();
+                let fg_just_changed = cur_fg != last_fg_hwnd;
+                if fg_just_changed {
+                    last_fg_hwnd = cur_fg;
+                    fg_changed_at = Some(Instant::now());
+                }
+
                 let submit_start = Instant::now();
-                let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
-                let mut resource: Option<IDXGIResource> = None;
-
-                let acquire = unsafe {
-                    gfx.duplication
-                        .AcquireNextFrame(0, &mut frame_info, &mut resource)
-                };
-
                 let gated = shared.privacy_gate.load(Ordering::Acquire);
                 let mut frame_ready = false;
 
-                match acquire {
-                    Ok(()) => {
-                        if gated {
-                            was_gated = true;
-                        } else if let Some(res) = resource.take() {
-                            match res.cast::<ID3D11Texture2D>() {
-                                Ok(t) => match converter.convert(&t) {
-                                    Ok(_) => {
-                                        has_converted_frame = true;
-                                        frame_ready = true;
-                                    }
-                                    Err(e) => {
-                                        log::warn!("[kage] color convert failed: {e}");
-                                        shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
-                                    }
-                                },
-                                Err(e) => {
-                                    log::warn!("[kage] frame cast failed: {e}");
+                if gfx.duplication.is_none() {
+                    let now_tick = Instant::now();
+                    if now_tick >= dupl_next_retry {
+                        match gfx.reacquire_duplication_same_device(cfg.monitor_index) {
+                            ReacquireOutcome::Reacquired => {
+                                log::info!(
+                                    "[kage] DXGI duplication reacquired on existing device ({}x{})",
+                                    gfx.src_width,
+                                    gfx.src_height
+                                );
+                                dupl_lost_since = None;
+                                dupl_backoff_ms = 40;
+                                dupl_created_at = Instant::now();
+                                dupl_saw_real_frame = false;
+                                consecutive_acquire_errors = 0;
+                                consecutive_convert_errors = 0;
+                                fg_changed_at = None;
+                                force_key = true;
+                                shared.set_state(EngineState::Buffering);
+                                *shared.last_error.write() = None;
+                                if let Err(e) = converter.ensure_source(
+                                    gfx.src_width,
+                                    gfx.src_height,
+                                    gfx.src_format,
+                                    gfx.src_rotation,
+                                ) {
+                                    log::warn!("[kage] post-reacquire converter update failed: {e}");
                                 }
                             }
-                        }
-                        // Release DXGI frame immediately after GPU blit so DXGI
-                        // contract holds and we never retain an acquired texture.
-                        unsafe {
-                            let _ = gfx.duplication.ReleaseFrame();
+                            ReacquireOutcome::TransientRetry(msg) => {
+                                shared.set_state(EngineState::Recovering);
+                                dupl_next_retry =
+                                    now_tick + Duration::from_millis(dupl_backoff_ms);
+                                dupl_backoff_ms = (dupl_backoff_ms * 2).min(250);
+                                let lost_dur = dupl_lost_since
+                                    .get_or_insert(now_tick)
+                                    .elapsed();
+                                if lost_dur >= Duration::from_secs(4) {
+                                    log::warn!(
+                                        "[kage] DXGI reacquire stalled for {:.1}s ({msg}); escalating to full device rebuild",
+                                        lost_dur.as_secs_f32()
+                                    );
+                                    shared.device_resets.fetch_add(1, Ordering::Relaxed);
+                                    shared.generation.fetch_add(1, Ordering::AcqRel);
+                                    shared.set_state(EngineState::Recovering);
+                                    encoder.flush();
+                                    drop(encoder);
+                                    drop(converter);
+                                    drop(gfx);
+                                    std::thread::sleep(Duration::from_millis(backoff_ms));
+                                    continue 'outer;
+                                }
+                            }
+                            ReacquireOutcome::NeedFullRebuild(msg) => {
+                                log::warn!(
+                                    "[kage] DXGI reacquire requires full device rebuild: {msg}"
+                                );
+                                shared.device_resets.fetch_add(1, Ordering::Relaxed);
+                                shared.generation.fetch_add(1, Ordering::AcqRel);
+                                shared.set_state(EngineState::Recovering);
+                                encoder.flush();
+                                drop(encoder);
+                                drop(converter);
+                                drop(gfx);
+                                std::thread::sleep(Duration::from_millis(backoff_ms));
+                                continue 'outer;
+                            }
                         }
                     }
-                    Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
+
+                    if gfx.duplication.is_none() {
                         if gated {
                             was_gated = true;
-                        } else if has_converted_frame {
-                            // Screen unchanged: reuse current NV12 texture directly without
-                            // touching DXGI or issuing ReleaseFrame() when nothing was acquired.
+                        } else if has_converted_frame
+                            && dupl_lost_since
+                                .map(|t| t.elapsed() < Duration::from_millis(600))
+                                .unwrap_or(false)
+                        {
+                            // Keep short mode transitions CFR-smooth on existing encoder.
                             frame_ready = true;
                         }
                     }
-                    Err(e) if is_device_lost(&e) => {
-                        log::warn!("[kage] device lost during acquire: {e}");
+                }
+
+                if gfx.duplication.is_some()
+                    && (fg_just_changed || last_mode_check.elapsed() >= Duration::from_millis(200))
+                {
+                    last_mode_check = Instant::now();
+                    if let Err(e) = unsafe { gfx.device.GetDeviceRemovedReason() } {
+                        log::warn!("[kage] device removed during health check: {}", hr(e));
                         shared.device_resets.fetch_add(1, Ordering::Relaxed);
                         shared.generation.fetch_add(1, Ordering::AcqRel);
                         shared.set_state(EngineState::Recovering);
@@ -2832,10 +3409,181 @@ mod win {
                         std::thread::sleep(Duration::from_millis(backoff_ms));
                         continue 'outer;
                     }
-                    Err(e) => {
-                        log::warn!("[kage] acquire error: {e}");
-                        shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
+
+                    let factory_stale = unsafe { !gfx.factory.IsCurrent().as_bool() };
+                    let mode_changed = query_display_mode(&gfx.device_name)
+                        .map(|m| m != (gfx.mode_width, gfx.mode_height, gfx.mode_orientation))
+                        .unwrap_or(false);
+                    let never_got_first_frame =
+                        !dupl_saw_real_frame && dupl_created_at.elapsed() >= Duration::from_millis(600);
+                    let fg_stalled = fg_changed_at.is_some_and(|t| {
+                        t.elapsed() >= Duration::from_millis(450) && last_present_at < t
+                    });
+                    let fs_stalled = last_present_at.elapsed() >= Duration::from_millis(2500)
+                        && last_proactive_reacquire.elapsed() >= Duration::from_millis(2500)
+                        && is_foreground_fullscreen(&gfx.monitor_rect);
+
+                    if factory_stale
+                        || mode_changed
+                        || never_got_first_frame
+                        || fg_stalled
+                        || fs_stalled
+                    {
+                        log::info!(
+                            "[kage] proactive duplication refresh (factory_stale={factory_stale}, mode_changed={mode_changed}, first_frame_stall={never_got_first_frame}, fg_stalled={fg_stalled}, fs_stalled={fs_stalled})"
+                        );
+                        gfx.duplication = None;
+                        dupl_lost_since = Some(Instant::now());
+                        dupl_next_retry = Instant::now();
+                        dupl_backoff_ms = 40;
+                        last_proactive_reacquire = Instant::now();
+                        fg_changed_at = None;
+                        shared.set_state(EngineState::Recovering);
                         continue;
+                    }
+                }
+
+                if let Some(dupl) = gfx.duplication.as_ref() {
+                    let timeout_ms = if !dupl_saw_real_frame { 16 } else { 0 };
+                    let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+                    let mut resource: Option<IDXGIResource> = None;
+
+                    let acquire =
+                        unsafe { dupl.AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource) };
+
+                    match acquire {
+                        Ok(()) => {
+                            consecutive_acquire_errors = 0;
+                            let has_image_update =
+                                frame_info.LastPresentTime != 0 || frame_info.AccumulatedFrames > 0;
+                            let mut convert_fatal = false;
+                            let mut convert_need_reacquire = false;
+
+                            if gated {
+                                was_gated = true;
+                            } else if has_image_update {
+                                if let Some(res) = resource.take() {
+                                    match res.cast::<ID3D11Texture2D>() {
+                                        Ok(t) => match converter.convert(&t, gfx.src_rotation) {
+                                            Ok(_) => {
+                                                has_converted_frame = true;
+                                                dupl_saw_real_frame = true;
+                                                last_present_at = Instant::now();
+                                                fg_changed_at = None;
+                                                consecutive_convert_errors = 0;
+                                                frame_ready = true;
+                                            }
+                                            Err(e) => {
+                                                consecutive_convert_errors += 1;
+                                                log::warn!("[kage] color convert failed ({consecutive_convert_errors}): {e}");
+                                                shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
+                                                if unsafe { gfx.device.GetDeviceRemovedReason() }.is_err() {
+                                                    convert_fatal = true;
+                                                } else if consecutive_convert_errors >= 3 {
+                                                    convert_need_reacquire = true;
+                                                }
+                                            }
+                                        },
+                                        Err(e) => {
+                                            log::warn!("[kage] frame cast failed: {e}");
+                                        }
+                                    }
+                                }
+                            } else if has_converted_frame {
+                                // Cursor-only desktop update: keep last presented video texture.
+                                frame_ready = true;
+                            }
+
+                            // Release DXGI frame immediately after GPU blit so DXGI
+                            // contract holds and we never retain an acquired texture.
+                            let rel_res = unsafe { dupl.ReleaseFrame() };
+                            if convert_fatal {
+                                shared.device_resets.fetch_add(1, Ordering::Relaxed);
+                                shared.generation.fetch_add(1, Ordering::AcqRel);
+                                shared.set_state(EngineState::Recovering);
+                                encoder.flush();
+                                drop(encoder);
+                                drop(converter);
+                                drop(gfx);
+                                std::thread::sleep(Duration::from_millis(backoff_ms));
+                                continue 'outer;
+                            }
+                            if let Err(re) = rel_res {
+                                if is_device_fatal(re.code()) {
+                                    log::warn!("[kage] device lost during ReleaseFrame: {}", hr(re));
+                                    shared.device_resets.fetch_add(1, Ordering::Relaxed);
+                                    shared.generation.fetch_add(1, Ordering::AcqRel);
+                                    shared.set_state(EngineState::Recovering);
+                                    encoder.flush();
+                                    drop(encoder);
+                                    drop(converter);
+                                    drop(gfx);
+                                    std::thread::sleep(Duration::from_millis(backoff_ms));
+                                    continue 'outer;
+                                } else if is_duplication_lost(re.code()) {
+                                    log::info!("[kage] duplication lost during ReleaseFrame: {}", hr(re));
+                                    gfx.duplication = None;
+                                    dupl_lost_since = Some(Instant::now());
+                                    dupl_next_retry = Instant::now();
+                                    dupl_backoff_ms = 40;
+                                    shared.set_state(EngineState::Recovering);
+                                }
+                            } else if convert_need_reacquire {
+                                gfx.duplication = None;
+                                dupl_lost_since = Some(Instant::now());
+                                dupl_next_retry = Instant::now();
+                                dupl_backoff_ms = 40;
+                                consecutive_convert_errors = 0;
+                                shared.set_state(EngineState::Recovering);
+                            }
+                        }
+                        Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
+                            consecutive_acquire_errors = 0;
+                            if gated {
+                                was_gated = true;
+                            } else if has_converted_frame {
+                                // Screen unchanged: reuse current NV12 texture directly without
+                                // touching DXGI or issuing ReleaseFrame() when nothing was acquired.
+                                frame_ready = true;
+                            }
+                        }
+                        Err(e) if is_device_fatal(e.code()) => {
+                            log::warn!("[kage] device lost during acquire: {}", hr(e));
+                            shared.device_resets.fetch_add(1, Ordering::Relaxed);
+                            shared.generation.fetch_add(1, Ordering::AcqRel);
+                            shared.set_state(EngineState::Recovering);
+                            encoder.flush();
+                            drop(encoder);
+                            drop(converter);
+                            drop(gfx);
+                            std::thread::sleep(Duration::from_millis(backoff_ms));
+                            continue 'outer;
+                        }
+                        Err(e) if is_duplication_lost(e.code()) => {
+                            log::info!("[kage] duplication lost during acquire ({}); reacquiring seamlessly", hr(e));
+                            gfx.duplication = None;
+                            dupl_lost_since = Some(Instant::now());
+                            dupl_next_retry = Instant::now();
+                            dupl_backoff_ms = 40;
+                            shared.set_state(EngineState::Recovering);
+                        }
+                        Err(e) => {
+                            consecutive_acquire_errors += 1;
+                            log::warn!(
+                                "[kage] acquire error ({consecutive_acquire_errors}): {}",
+                                hr(e)
+                            );
+                            shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
+                            if consecutive_acquire_errors >= 5 {
+                                gfx.duplication = None;
+                                dupl_lost_since = Some(Instant::now());
+                                dupl_next_retry = Instant::now();
+                                dupl_backoff_ms = 40;
+                                consecutive_acquire_errors = 0;
+                                shared.set_state(EngineState::Recovering);
+                            }
+                            continue;
+                        }
                     }
                 }
 
@@ -2865,12 +3613,15 @@ mod win {
 
                     // Drain finished outputs first so a full output queue never
                     // prevents the MFT from requesting this frame.
+                    let mut drain_err = false;
                     if let Err(e) = encoder.drain(&mut collect) {
+                        drain_err = true;
                         if !shared.stop_requested.load(Ordering::Acquire) {
                             log::warn!("[kage] encoder drain failed: {e}");
                         }
                     }
 
+                    let mut submit_err = false;
                     let accepted = match encoder.submit(
                         converter.current_nv12(),
                         pts,
@@ -2886,6 +3637,7 @@ mod win {
                         }
                         Ok(false) => false,
                         Err(e) => {
+                            submit_err = true;
                             log::warn!("[kage] encoder submit failed: {e}");
                             false
                         }
@@ -2899,9 +3651,33 @@ mod win {
                     }
 
                     if let Err(e) = encoder.drain(&mut collect) {
+                        drain_err = true;
                         if !shared.stop_requested.load(Ordering::Acquire) {
                             log::warn!("[kage] encoder drain failed: {e}");
                         }
+                    }
+
+                    if accepted || !packet_batch.is_empty() {
+                        consecutive_encode_failures = 0;
+                    } else if submit_err || drain_err {
+                        consecutive_encode_failures = consecutive_encode_failures.saturating_add(10);
+                    } else {
+                        consecutive_encode_failures = consecutive_encode_failures.saturating_add(1);
+                    }
+
+                    if consecutive_encode_failures >= 60 {
+                        log::warn!(
+                            "[kage] encoder stalled ({consecutive_encode_failures}); rebuilding capture pipeline"
+                        );
+                        shared.device_resets.fetch_add(1, Ordering::Relaxed);
+                        shared.generation.fetch_add(1, Ordering::AcqRel);
+                        shared.set_state(EngineState::Recovering);
+                        encoder.flush();
+                        drop(encoder);
+                        drop(converter);
+                        drop(gfx);
+                        std::thread::sleep(Duration::from_millis(backoff_ms));
+                        continue 'outer;
                     }
 
                     if !packet_batch.is_empty() {
@@ -3052,8 +3828,7 @@ mod sim {
         fmt: Arc<Mutex<Option<VideoFormatHeader>>>,
         _clock: Arc<super::QpcClock>,
     ) {
-        let w = if cfg.width == 0 { 1920 } else { cfg.width };
-        let h = if cfg.height == 0 { 1080 } else { cfg.height };
+        let (w, h) = compute_canvas_dimensions(1920, 1080, cfg.width, cfg.height, cfg.max_height);
 
         *shared.encoder.write() = EncoderInfo {
             vendor: EncoderVendor::MediaFoundationSoftware,
@@ -3577,5 +4352,278 @@ mod ring_buffer_tests {
 
         engine.stop();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod aspect_ratio_tests {
+    use super::{compute_aspect_fit_rect, compute_canvas_dimensions};
+
+    fn assert_fit_invariants(src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> (i32, i32, i32, i32) {
+        let (l, t, r, b) = compute_aspect_fit_rect(src_w, src_h, dst_w, dst_h);
+        assert!(l >= 0 && t >= 0 && r <= dst_w as i32 && b <= dst_h as i32);
+        assert_eq!(l % 2, 0, "left {l} must be even");
+        assert_eq!(t % 2, 0, "top {t} must be even");
+        assert_eq!(r % 2, 0, "right {r} must be even");
+        assert_eq!(b % 2, 0, "bottom {b} must be even");
+        let fit_w = (r - l) as f64;
+        let fit_h = (b - t) as f64;
+        assert!(fit_w >= 2.0 && fit_h >= 2.0);
+        let src_ar = src_w as f64 / src_h as f64;
+        let fit_ar = fit_w / fit_h;
+        let rel_err = (src_ar - fit_ar).abs() / src_ar;
+        assert!(
+            rel_err < 0.005,
+            "aspect ratio mismatch for {src_w}x{src_h} -> {dst_w}x{dst_h}: src_ar={src_ar:.4}, fit_ar={fit_ar:.4}, rect=({l},{t},{r},{b})"
+        );
+        (l, t, r, b)
+    }
+
+    #[test]
+    fn same_aspect_ratio_fills_canvas() {
+        for (sw, sh, dw, dh) in [
+            (1600, 900, 1920, 1080),
+            (1920, 1080, 1600, 900),
+            (1280, 720, 1920, 1080),
+            (2560, 1440, 1920, 1080),
+            (1920, 1080, 1920, 1080),
+        ] {
+            assert_eq!(
+                assert_fit_invariants(sw, sh, dw, dh),
+                (0, 0, dw as i32, dh as i32)
+            );
+        }
+    }
+
+    #[test]
+    fn narrower_aspect_ratios_pillarbox_cleanly() {
+        assert_eq!(assert_fit_invariants(1280, 960, 1920, 1080), (240, 0, 1680, 1080));
+        assert_eq!(assert_fit_invariants(1440, 1080, 1920, 1080), (240, 0, 1680, 1080));
+        assert_eq!(assert_fit_invariants(1680, 1050, 1920, 1080), (96, 0, 1824, 1080));
+        let (l54, _, r54, _) = assert_fit_invariants(1280, 1024, 1920, 1080);
+        assert!(l54 > 0 && r54 < 1920);
+        let (lp, tp, rp, bp) = assert_fit_invariants(1080, 1920, 1920, 1080);
+        assert!(lp > 0 && tp == 0 && rp < 1920 && bp == 1080);
+        let (ls, _, rs, _) = assert_fit_invariants(1000, 1000, 1920, 1080);
+        assert!(ls > 0 && rs < 1920);
+    }
+
+    #[test]
+    fn wider_and_odd_aspect_ratios_letterbox_cleanly() {
+        for (sw, sh, dw, dh) in [
+            (2560, 1080, 1920, 1080),
+            (3440, 1440, 1920, 1080),
+            (3840, 1080, 1920, 1080),
+            (1920, 1080, 1280, 960),
+            (1920, 1080, 1920, 1200),
+            (1366, 768, 1920, 1080),
+            (1366, 768, 1600, 900),
+            (1152, 864, 1920, 1080),
+        ] {
+            assert_fit_invariants(sw, sh, dw, dh);
+        }
+    }
+
+    #[test]
+    fn canvas_dimensions_preserve_aspect_with_max_height_and_even_bounds() {
+        assert_eq!(compute_canvas_dimensions(1920, 1080, 0, 0, 0), (1920, 1080));
+        assert_eq!(compute_canvas_dimensions(2560, 1440, 0, 0, 1080), (1920, 1080));
+        assert_eq!(compute_canvas_dimensions(3440, 1440, 0, 0, 1080), (2580, 1080));
+        assert_eq!(compute_canvas_dimensions(2560, 1600, 0, 0, 1080), (1728, 1080));
+        assert_eq!(compute_canvas_dimensions(1600, 1200, 0, 0, 1080), (1440, 1080));
+        assert_eq!(compute_canvas_dimensions(1080, 1920, 0, 0, 1080), (608, 1080));
+        assert_eq!(compute_canvas_dimensions(1366, 768, 0, 0, 0), (1366, 768));
+        assert_eq!(compute_canvas_dimensions(1367, 769, 0, 0, 0), (1366, 768));
+        assert_eq!(compute_canvas_dimensions(0, 0, 0, 0, 0), (1920, 1080));
+        assert_eq!(compute_canvas_dimensions(1600, 900, 1280, 720, 480), (1280, 720));
+    }
+}
+
+#[cfg(all(test, windows, not(feature = "headless-sim")))]
+mod win_gpu_tests {
+    use super::win::{ColorConverter, HardwareEncoder, MfSession};
+    use super::*;
+    use windows::Win32::Foundation::HMODULE;
+    use windows::Win32::Graphics::Direct3D::{
+        D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+    };
+    use windows::Win32::Graphics::Direct3D11::*;
+    use windows::Win32::Graphics::Dxgi::Common::*;
+    use windows::Win32::Graphics::Dxgi::*;
+
+    fn create_test_d3d11() -> (ID3D11Device, ID3D11DeviceContext, String, u64) {
+        unsafe {
+            let factory: IDXGIFactory1 = CreateDXGIFactory1().expect("DXGI factory");
+            let mut idx = 0u32;
+            while let Ok(adapter) = factory.EnumAdapters1(idx) {
+                let desc = adapter.GetDesc1().expect("adapter desc");
+                if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0 {
+                    idx += 1;
+                    continue;
+                }
+                let levels = [D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0];
+                let mut device = None;
+                let mut context = None;
+                let mut level = D3D_FEATURE_LEVEL::default();
+                if D3D11CreateDevice(
+                    &adapter,
+                    windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                    Some(&levels),
+                    D3D11_SDK_VERSION,
+                    Some(&mut device),
+                    Some(&mut level),
+                    Some(&mut context),
+                )
+                .is_ok()
+                {
+                    let name = String::from_utf16_lossy(
+                        &desc.Description[..desc
+                            .Description
+                            .iter()
+                            .position(|&c| c == 0)
+                            .unwrap_or(desc.Description.len())],
+                    );
+                    let vram_mb = (desc.DedicatedVideoMemory / (1024 * 1024)) as u64;
+                    return (device.unwrap(), context.unwrap(), name, vram_mb);
+                }
+                idx += 1;
+            }
+            panic!("no hardware D3D11 adapter found");
+        }
+    }
+
+    fn make_bgra_texture(device: &ID3D11Device, w: u32, h: u32) -> ID3D11Texture2D {
+        unsafe {
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: w,
+                Height: h,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_DEFAULT,
+                BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
+                CPUAccessFlags: 0,
+                MiscFlags: 0,
+            };
+            let mut tex = None;
+            device
+                .CreateTexture2D(&desc, None, Some(&mut tex))
+                .expect("CreateTexture2D");
+            tex.unwrap()
+        }
+    }
+
+    #[test]
+    fn color_converter_handles_all_aspect_ratios_and_rapid_resolution_switches() {
+        let _mf = MfSession::new().expect("MF startup");
+        let (device, context, adapter_name, vram_mb) = create_test_d3d11();
+
+        let mut converter = ColorConverter::new(
+            &device,
+            &context,
+            1920,
+            1080,
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            DXGI_MODE_ROTATION_IDENTITY,
+            1920,
+            1080,
+            60,
+            false,
+        )
+        .expect("ColorConverter 1920x1080");
+
+        let mut encoder = HardwareEncoder::create(
+            &device,
+            1920,
+            1080,
+            60,
+            12_000,
+            Codec::H264,
+            false,
+            &adapter_name,
+            vram_mb,
+        )
+        .expect("HardwareEncoder 1920x1080");
+
+        let sequence = [
+            (1920, 1080),
+            (1600, 900),
+            (1920, 1080),
+            (1600, 900),
+            (1280, 960),
+            (1440, 1080),
+            (1280, 1024),
+            (1680, 1050),
+            (1366, 768),
+            (2560, 1080),
+            (1080, 1920),
+            (1920, 1080),
+        ];
+
+        let mut encoded_packets = 0usize;
+        let frame_hns = HNS_PER_SECOND / 60;
+        let mut pts = 0i64;
+
+        for (idx, &(w, h)) in sequence.iter().enumerate() {
+            let src = make_bgra_texture(&device, w, h);
+            let nv12 = converter
+                .convert(&src, DXGI_MODE_ROTATION_IDENTITY)
+                .unwrap_or_else(|e| panic!("convert failed at {w}x{h}: {e}"));
+            let _ = encoder.drain(|_, _, _, _| {
+                encoded_packets += 1;
+            });
+            let accepted = encoder
+                .submit(nv12, pts, frame_hns, idx == 0)
+                .expect("encoder submit");
+            if !accepted {
+                std::thread::sleep(Duration::from_millis(8));
+                let _ = encoder.drain(|_, _, _, _| {
+                    encoded_packets += 1;
+                });
+                let _ = encoder.submit(nv12, pts, frame_hns, idx == 0);
+            }
+            let _ = encoder.drain(|_, _, _, _| {
+                encoded_packets += 1;
+            });
+            pts += frame_hns;
+        }
+
+        for _ in 0..8 {
+            std::thread::sleep(Duration::from_millis(10));
+            let _ = encoder.drain(|_, _, _, _| {
+                encoded_packets += 1;
+            });
+            if encoded_packets > 0 {
+                break;
+            }
+        }
+        assert!(encoded_packets > 0, "expected encoded H.264 packets across mode switches");
+
+        // Also verify a 4:3 encoder canvas cleanly handles 16:9 and 21:9 sources.
+        let mut conv_43 = ColorConverter::new(
+            &device,
+            &context,
+            1280,
+            960,
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            DXGI_MODE_ROTATION_IDENTITY,
+            1280,
+            960,
+            60,
+            false,
+        )
+        .expect("ColorConverter 4:3");
+        for (w, h) in [(1920, 1080), (2560, 1080), (1600, 900)] {
+            let src = make_bgra_texture(&device, w, h);
+            conv_43
+                .convert(&src, DXGI_MODE_ROTATION_IDENTITY)
+                .unwrap_or_else(|e| panic!("4:3 canvas convert failed for {w}x{h}: {e}"));
+        }
     }
 }
