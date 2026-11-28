@@ -591,12 +591,24 @@ export class SimEngine {
     return { clip, flushMs: performance.now() - t0 };
   }
 
+  private externalClips: ClipMetadata[] = [];
+
+  registerExternal(clip: ClipMetadata) {
+    this.externalClips = [clip, ...this.externalClips.filter((c) => c.path !== clip.path)].slice(
+      0,
+      8,
+    );
+  }
+
   list(): ClipMetadata[] {
     return this.clips;
   }
 
   find(path: string): ClipMetadata | undefined {
-    return this.clips.find((c) => c.path === path);
+    return (
+      this.clips.find((c) => c.path === path) ??
+      this.externalClips.find((c) => c.path === path)
+    );
   }
 
   delete(path: string) {
@@ -641,9 +653,10 @@ export class SimEngine {
     start: number,
     end: number,
     suffix = "_trim",
-    overwrite = false,
+    overwrite = true,
+    destInLibrary = false,
   ): ClipMetadata {
-    const source = this.clips.find((c) => c.path === path);
+    const source = this.find(path);
     if (!source) throw new Error("clip not found");
     const duration = Math.max(0.1, end - start);
     const size = Math.round(
@@ -655,18 +668,25 @@ export class SimEngine {
       source.created_unix_ms = Date.now();
       return { ...source };
     }
-    const fileName = source.file_name.replace(/\.mp4$/, `${suffix}.mp4`);
+    const baseName = source.file_name.replace(/\.[^.]+$/, "");
+    const fileName = `${baseName}${suffix}.mp4`;
+    const nextPath = destInLibrary
+      ? `C:\\Users\\You\\Videos\\KAGE\\${fileName}`
+      : source.path.replace(/[^\\/]+$/, () => fileName);
     const clip: ClipMetadata = {
       ...source,
       id: `${fileName}-${Date.now()}`,
-      path: source.path.replace(/\.mp4$/, `${suffix}.mp4`),
+      path: nextPath,
       file_name: fileName,
       title: `${source.title} (${suffix.replace(/^_/, "")})`,
       duration_seconds: duration,
       size_bytes: size,
       created_unix_ms: Date.now(),
+      external: destInLibrary ? false : source.external,
     };
-    this.clips = [clip, ...this.clips];
+    if (destInLibrary || !source.external) {
+      this.clips = [clip, ...this.clips];
+    }
     return clip;
   }
 

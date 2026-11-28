@@ -266,6 +266,57 @@ export const kage = {
     return clip;
   },
 
+  async openExternalVideo(path: string): Promise<ClipMetadata> {
+    if (isTauri()) {
+      return invoke<ClipMetadata>("open_external_video", { path });
+    }
+    const sim = await getSim();
+    const existing = sim.find(path);
+    if (existing) return existing;
+    throw new Error("Drop or browse a local video file to open it in Trimmer");
+  },
+
+  async registerBrowserVideo(file: File): Promise<ClipMetadata> {
+    const url = URL.createObjectURL(file);
+    const meta = await new Promise<{ duration: number; width: number; height: number }>((resolve) => {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.muted = true;
+      video.src = url;
+      const done = () =>
+        resolve({
+          duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 10,
+          width: video.videoWidth || 1920,
+          height: video.videoHeight || 1080,
+        });
+      video.onloadedmetadata = done;
+      video.onerror = done;
+      window.setTimeout(done, 1500);
+    });
+    const sim = await getSim();
+    const clip: ClipMetadata = {
+      id: `ext-${file.name}-${Date.now()}`,
+      path: `external://${file.name}-${file.size}-${Date.now()}`,
+      file_name: file.name,
+      title: file.name.replace(/\.[^.]+$/, "").replace(/_/g, " "),
+      duration_seconds: meta.duration,
+      size_bytes: file.size,
+      created_unix_ms: file.lastModified || Date.now(),
+      width: meta.width,
+      height: meta.height,
+      fps: 60,
+      has_audio: true,
+      game: null,
+      thumbnail: null,
+      favorite: false,
+      tags: [],
+      external: true,
+      preview_url: url,
+    };
+    sim.registerExternal(clip);
+    return clip;
+  },
+
   async getClips(withThumbnails = true): Promise<ClipMetadata[]> {
     if (isTauri()) return invoke<ClipMetadata[]>("get_recorded_clips", { withThumbnails });
     const sim = await getSim();
@@ -316,7 +367,8 @@ export const kage = {
     sourcePath: string,
     startTime: number,
     endTime: number,
-    overwrite = false,
+    overwrite = true,
+    destInLibrary = false,
   ): Promise<TrimResult> {
     if (isTauri()) {
       return invoke<TrimResult>("trim_clip", {
@@ -324,11 +376,12 @@ export const kage = {
         startTime,
         endTime,
         overwrite,
+        destInLibrary,
       });
     }
     const sim = await getSim();
     const t0 = performance.now();
-    const clip = sim.trim(sourcePath, startTime, endTime, "_trim", overwrite);
+    const clip = sim.trim(sourcePath, startTime, endTime, "_trim", overwrite, destInLibrary);
     return {
       path: clip.path,
       file_name: clip.file_name,
@@ -712,6 +765,15 @@ export const kage = {
   },
   onDeckHidden(handler: Handler<void>) {
     return listen<void>(CHANNELS.deckHidden, handler);
+  },
+  onDragEnter(handler: Handler<{ paths?: string[] }>) {
+    return listen<{ paths?: string[] }>("tauri://drag-enter", handler);
+  },
+  onDragDrop(handler: Handler<{ paths?: string[] }>) {
+    return listen<{ paths?: string[] }>("tauri://drag-drop", handler);
+  },
+  onDragLeave(handler: Handler<unknown>) {
+    return listen<unknown>("tauri://drag-leave", handler);
   },
   emitLocalHotkey(accelerator: string) {
     emitLocal(CHANNELS.hotkey, accelerator);

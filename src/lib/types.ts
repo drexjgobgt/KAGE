@@ -76,6 +76,7 @@ export interface ClipMetadata {
   thumbnail: string | null;
   favorite: boolean;
   tags: string[];
+  external?: boolean;
   preview_url?: string;
 }
 

@@ -26,6 +26,8 @@ pub struct ClipMetadata {
     pub favorite: bool,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub external: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +193,7 @@ fn scan_into(
             thumbnail,
             favorite: false,
             tags: Vec::new(),
+            external: false,
         });
     }
     Ok(())
@@ -211,9 +214,11 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 fn pretty_title(file_name: &str) -> String {
-    file_name
-        .trim_end_matches(".mp4")
-        .replace("KAGE_Replay_", "Replay ")
+    let stem = Path::new(file_name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_name.to_string());
+    stem.replace("KAGE_Replay_", "Replay ")
         .replace("KAGE_Rec_", "Rec ")
         .replace("ClipFlow_", "Clip ")
         .replace('_', " ")
@@ -335,12 +340,11 @@ impl Default for ProbeResult {
     }
 }
 
-pub fn suggested_trim_path(source: &Path) -> PathBuf {
+pub fn suggested_trim_path_in_dir(dir: &Path, source: &Path) -> PathBuf {
     let stem = source
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "clip".into());
-    let dir = source.parent().unwrap_or_else(|| Path::new("."));
     let mut candidate = dir.join(format!("{stem}_trim.mp4"));
     let mut n = 2;
     while candidate.exists() {
@@ -348,6 +352,62 @@ pub fn suggested_trim_path(source: &Path) -> PathBuf {
         n += 1;
     }
     candidate
+}
+
+pub fn suggested_trim_path(source: &Path) -> PathBuf {
+    let dir = source.parent().unwrap_or_else(|| Path::new("."));
+    suggested_trim_path_in_dir(dir, source)
+}
+
+pub fn metadata_for_file(path: &Path, output_dir: &Path) -> RResult<ClipMetadata> {
+    let meta = std::fs::metadata(path)?;
+    let info = probe(path)?;
+    let created_unix_ms = meta
+        .created()
+        .or_else(|_| meta.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let file_name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let canon_file = std::fs::canonicalize(path).ok();
+    let canon_root = std::fs::canonicalize(output_dir).ok();
+    let external = match (&canon_file, &canon_root) {
+        (Some(f), Some(r)) => !f.starts_with(r),
+        _ => true,
+    };
+    let game = if !external {
+        canon_file
+            .as_ref()
+            .zip(canon_root.as_ref())
+            .and_then(|(f, r)| f.parent().and_then(|p| p.strip_prefix(r).ok()))
+            .filter(|rel| !rel.as_os_str().is_empty())
+            .map(|rel| rel.to_string_lossy().to_string())
+    } else {
+        None
+    };
+    let key = path.to_string_lossy().to_string();
+    Ok(ClipMetadata {
+        id: format!("{:x}", fnv1a(key.as_bytes()) ^ created_unix_ms as u64),
+        path: key,
+        title: pretty_title(&file_name),
+        file_name,
+        duration_seconds: info.duration_seconds,
+        size_bytes: meta.len(),
+        created_unix_ms,
+        width: info.width,
+        height: info.height,
+        fps: info.fps,
+        has_audio: info.has_audio,
+        game,
+        thumbnail: None,
+        favorite: false,
+        tags: Vec::new(),
+        external,
+    })
 }
 
 // Windows Media Foundation implementation
@@ -693,7 +753,7 @@ mod imp {
         Ok(atype)
     }
 
-    pub(super) fn trim(
+    fn trim_stream_copy_imp(
         source: &Path,
         dest: &Path,
         start: f32,
@@ -838,7 +898,7 @@ mod imp {
                     if base.is_none() {
                         let is_clean =
                             sample.GetUINT32(&MFSampleExtension_CleanPoint).unwrap_or(1) == 1;
-                        if start > 0.05 && !is_clean && ts < start_hns + HNS_PER_SECOND {
+                        if start > 0.05 && !is_clean {
                             continue;
                         }
                         base = Some(ts);
@@ -879,6 +939,383 @@ mod imp {
             writer.Finalize().map_err(err)?;
             let duration = (last_end - base_ts).max(0) as f32 / HNS_PER_SECOND as f32;
             Ok((duration, snapped))
+        }
+    }
+
+    fn trim_precise_imp(
+        source: &Path,
+        dest: &Path,
+        start: f32,
+        end: f32,
+    ) -> RResult<(f32, f32)> {
+        let _mf = Mf::enter()?;
+        unsafe {
+            let reader = open_reader(source, false, true)
+                .or_else(|_| open_reader(source, false, false))?;
+            let mut video_stream_idx = None;
+            let mut audio_stream_idx = None;
+            for i in 0..16 {
+                if let Ok(st) = reader.GetNativeMediaType(i, 0) {
+                    if let Ok(major) = st.GetGUID(&MF_MT_MAJOR_TYPE) {
+                        if major == MFMediaType_Video && video_stream_idx.is_none() {
+                            video_stream_idx = Some(i);
+                        } else if major == MFMediaType_Audio && audio_stream_idx.is_none() {
+                            audio_stream_idx = Some(i);
+                        }
+                    }
+                }
+            }
+            let video_stream_idx =
+                video_stream_idx.ok_or_else(|| RecorderError::Other("no video stream".into()))?;
+
+            reader
+                .SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)
+                .map_err(err)?;
+            reader
+                .SetStreamSelection(video_stream_idx, true)
+                .map_err(err)?;
+
+            let native_video = reader.GetNativeMediaType(video_stream_idx, 0).map_err(err)?;
+            let nv12_req = MFCreateMediaType().map_err(err)?;
+            nv12_req
+                .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
+                .map_err(err)?;
+            nv12_req
+                .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)
+                .map_err(err)?;
+            reader
+                .SetCurrentMediaType(video_stream_idx, None, &nv12_req)
+                .map_err(err)?;
+            let nv12_in = reader.GetCurrentMediaType(video_stream_idx).map_err(err)?;
+
+            let size = nv12_in
+                .GetUINT64(&MF_MT_FRAME_SIZE)
+                .or_else(|_| native_video.GetUINT64(&MF_MT_FRAME_SIZE))
+                .map_err(err)?;
+            let raw_w = (size >> 32) as u32;
+            let raw_h = (size & 0xFFFF_FFFF) as u32;
+            let w = (raw_w & !1).max(16);
+            let h = (raw_h & !1).max(16);
+
+            let (fps_num, fps_den) = native_video
+                .GetUINT64(&MF_MT_FRAME_RATE)
+                .ok()
+                .map(|r| ((r >> 32) as u32, (r & 0xFFFF_FFFF) as u32))
+                .filter(|(n, d)| *n > 0 && *d > 0)
+                .unwrap_or((60, 1));
+            let frame_hns = (HNS_PER_SECOND * fps_den as i64) / fps_num.max(1) as i64;
+            let bitrate = native_video
+                .GetUINT32(&MF_MT_AVG_BITRATE)
+                .ok()
+                .filter(|&b| b >= 1_000_000)
+                .unwrap_or(((w as u64 * h as u64 * 6) as u32).clamp(2_000_000, 35_000_000));
+
+            let mut target_sr = 48_000u32;
+            let mut target_ch = 2u32;
+            let mut pcm_in: Option<IMFMediaType> = None;
+            if let Some(a_idx) = audio_stream_idx {
+                if reader.SetStreamSelection(a_idx, true).is_ok() {
+                    if let Ok(native_audio) = reader.GetNativeMediaType(a_idx, 0) {
+                        let native_sr = native_audio
+                            .GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND)
+                            .unwrap_or(48_000);
+                        let native_ch = native_audio
+                            .GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS)
+                            .unwrap_or(2);
+                        target_sr = if native_sr == 44_100 { 44_100 } else { 48_000 };
+                        target_ch = if native_ch == 1 { 1 } else { 2 };
+                    }
+                    let setup_pcm = || -> RResult<IMFMediaType> {
+                        let req = MFCreateMediaType().map_err(err)?;
+                        req.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)
+                            .map_err(err)?;
+                        req.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM)
+                            .map_err(err)?;
+                        req.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, target_sr)
+                            .map_err(err)?;
+                        req.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, target_ch)
+                            .map_err(err)?;
+                        req.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16)
+                            .map_err(err)?;
+                        reader
+                            .SetCurrentMediaType(a_idx, None, &req)
+                            .map_err(err)?;
+                        reader.GetCurrentMediaType(a_idx).map_err(err)
+                    };
+                    match setup_pcm() {
+                        Ok(mt) => pcm_in = Some(mt),
+                        Err(e) => {
+                            log::warn!("[kage::trim] precise audio setup skipped: {e}");
+                            let _ = reader.SetStreamSelection(a_idx, false);
+                        }
+                    }
+                }
+            }
+
+            let open_writer = |hw: bool| -> RResult<(IMFSinkWriter, u32, Option<u32>)> {
+                let mut attrs: Option<IMFAttributes> = None;
+                MFCreateAttributes(&mut attrs, 4).map_err(err)?;
+                let attrs = attrs.ok_or_else(|| RecorderError::Other("sink attrs".into()))?;
+                attrs
+                    .SetGUID(&MF_TRANSCODE_CONTAINERTYPE, &MFTranscodeContainerType_MPEG4)
+                    .map_err(err)?;
+                let _ = attrs.SetUINT32(&MF_SINK_WRITER_DISABLE_THROTTLING, 1);
+                let _ = attrs.SetUINT32(
+                    &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+                    if hw { 1 } else { 0 },
+                );
+
+                let w_dest = wide(dest);
+                let writer = MFCreateSinkWriterFromURL(PCWSTR(w_dest.as_ptr()), None, &attrs)
+                    .map_err(err)?;
+
+                let v_out_mt = MFCreateMediaType().map_err(err)?;
+                v_out_mt
+                    .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
+                    .map_err(err)?;
+                v_out_mt
+                    .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264)
+                    .map_err(err)?;
+                v_out_mt
+                    .SetUINT32(&MF_MT_AVG_BITRATE, bitrate)
+                    .map_err(err)?;
+                v_out_mt
+                    .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
+                    .map_err(err)?;
+                v_out_mt
+                    .SetUINT64(&MF_MT_FRAME_SIZE, ((w as u64) << 32) | h as u64)
+                    .map_err(err)?;
+                v_out_mt
+                    .SetUINT64(&MF_MT_FRAME_RATE, ((fps_num as u64) << 32) | fps_den as u64)
+                    .map_err(err)?;
+                v_out_mt
+                    .SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, (1u64 << 32) | 1u64)
+                    .map_err(err)?;
+                let _ = v_out_mt.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High.0 as u32);
+                let _ = v_out_mt.SetUINT32(&MF_MT_MAX_KEYFRAME_SPACING, fps_num.max(1));
+                let v_out = writer.AddStream(&v_out_mt).map_err(err)?;
+                writer
+                    .SetInputMediaType(v_out, &nv12_in, None)
+                    .map_err(err)?;
+
+                let a_out = match pcm_in.as_ref() {
+                    Some(in_mt) => {
+                        let add_aac = || -> RResult<u32> {
+                            let aac = MFCreateMediaType().map_err(err)?;
+                            aac.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)
+                                .map_err(err)?;
+                            aac.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_AAC)
+                                .map_err(err)?;
+                            aac.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, target_sr)
+                                .map_err(err)?;
+                            aac.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, target_ch)
+                                .map_err(err)?;
+                            aac.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16)
+                                .map_err(err)?;
+                            aac.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 24_000)
+                                .map_err(err)?;
+                            let _ = aac.SetUINT32(&MF_MT_AAC_PAYLOAD_TYPE, 0);
+                            let _ = aac.SetUINT32(&MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29);
+                            let s = writer.AddStream(&aac).map_err(err)?;
+                            writer.SetInputMediaType(s, in_mt, None).map_err(err)?;
+                            Ok(s)
+                        };
+                        match add_aac() {
+                            Ok(s) => Some(s),
+                            Err(e) => {
+                                log::warn!("[kage::trim] skipping precise audio stream: {e}");
+                                None
+                            }
+                        }
+                    }
+                    None => None,
+                };
+
+                writer.BeginWriting().map_err(err)?;
+                Ok((writer, v_out, a_out))
+            };
+
+            let (writer, v_out, a_out) = open_writer(true).or_else(|_| {
+                let _ = std::fs::remove_file(dest);
+                open_writer(false)
+            })?;
+
+            if a_out.is_none() {
+                if let Some(a_idx) = audio_stream_idx {
+                    let _ = reader.SetStreamSelection(a_idx, false);
+                }
+            }
+
+            let start_hns = (start.max(0.0) as f64 * HNS_PER_SECOND as f64) as i64;
+            let end_hns = (end.max(0.0) as f64 * HNS_PER_SECOND as f64) as i64;
+            let seek_pos = (start_hns - HNS_PER_SECOND / 2).max(0);
+            let var = windows::core::PROPVARIANT::from(seek_pos);
+            reader
+                .SetCurrentPosition(&windows::core::GUID::zeroed(), &var)
+                .map_err(err)?;
+
+            let mut base: Option<i64> = None;
+            let mut snapped = start;
+            let mut last_end = start_hns;
+            let mut wrote_video = 0usize;
+            let mut video_done = false;
+            let mut audio_done = a_out.is_none();
+            let mut pending_audio: std::collections::VecDeque<(IMFSample, i64, i64)> =
+                std::collections::VecDeque::with_capacity(64);
+
+            loop {
+                let mut stream_index = 0u32;
+                let mut flags = 0u32;
+                let mut ts = 0i64;
+                let mut sample: Option<IMFSample> = None;
+                reader
+                    .ReadSample(
+                        MF_SOURCE_READER_ANY_STREAM.0 as u32,
+                        0,
+                        Some(&mut stream_index),
+                        Some(&mut flags),
+                        Some(&mut ts),
+                        Some(&mut sample),
+                    )
+                    .map_err(err)?;
+
+                if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32) != 0 {
+                    if stream_index == video_stream_idx {
+                        if let Ok(updated) = reader.GetCurrentMediaType(video_stream_idx) {
+                            let _ = writer.SetInputMediaType(v_out, &updated, None);
+                        }
+                    } else if Some(stream_index) == audio_stream_idx {
+                        if let Some(ao) = a_out {
+                            if let Ok(updated) = reader.GetCurrentMediaType(stream_index) {
+                                let _ = writer.SetInputMediaType(ao, &updated, None);
+                            }
+                        }
+                    }
+                }
+
+                if (flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32) != 0 {
+                    if stream_index == video_stream_idx {
+                        video_done = true;
+                    } else if Some(stream_index) == audio_stream_idx {
+                        audio_done = true;
+                    } else {
+                        break;
+                    }
+                    if video_done && audio_done {
+                        break;
+                    }
+                    continue;
+                }
+                let Some(sample) = sample else { continue };
+
+                if stream_index == video_stream_idx {
+                    if ts >= end_hns {
+                        video_done = true;
+                        if audio_done {
+                            break;
+                        }
+                        continue;
+                    }
+                    let dur = sample.GetSampleDuration().unwrap_or(frame_hns).max(1);
+                    if ts + dur <= start_hns {
+                        continue;
+                    }
+                    let base_ts = match base {
+                        Some(b) => b,
+                        None => {
+                            base = Some(ts);
+                            snapped = ts as f32 / HNS_PER_SECOND as f32;
+                            if let Some(ao) = a_out {
+                                while let Some((asample, ats, adur)) = pending_audio.pop_front() {
+                                    if ats + adur > ts && ats < end_hns {
+                                        let rebased = (ats - ts).max(0);
+                                        let _ = asample.SetSampleTime(rebased);
+                                        writer.WriteSample(ao, &asample).map_err(err)?;
+                                    }
+                                }
+                            } else {
+                                pending_audio.clear();
+                            }
+                            ts
+                        }
+                    };
+                    let clipped_dur = if ts + dur > end_hns {
+                        (end_hns - ts).max(1)
+                    } else {
+                        dur
+                    };
+                    let _ = sample.SetSampleDuration(clipped_dur);
+                    sample
+                        .SetSampleTime((ts - base_ts).max(0))
+                        .map_err(err)?;
+                    last_end = last_end.max(ts + clipped_dur);
+                    writer.WriteSample(v_out, &sample).map_err(err)?;
+                    wrote_video += 1;
+                } else if Some(stream_index) == audio_stream_idx {
+                    if let Some(ao) = a_out {
+                        if ts >= end_hns {
+                            audio_done = true;
+                            if video_done {
+                                break;
+                            }
+                            continue;
+                        }
+                        let dur = sample.GetSampleDuration().unwrap_or(0);
+                        if ts + dur <= start_hns {
+                            continue;
+                        }
+                        if let Some(base_ts) = base {
+                            sample
+                                .SetSampleTime((ts - base_ts).max(0))
+                                .map_err(err)?;
+                            writer.WriteSample(ao, &sample).map_err(err)?;
+                        } else {
+                            if pending_audio.len() >= 64 {
+                                pending_audio.pop_front();
+                            }
+                            pending_audio.push_back((sample, ts, dur));
+                        }
+                    }
+                }
+            }
+
+            let base_ts = base.filter(|_| wrote_video > 0).ok_or_else(|| {
+                RecorderError::Other("no video frames found in the selected range".into())
+            })?;
+            writer.Finalize().map_err(err)?;
+            let duration = (last_end - base_ts).max(0) as f32 / HNS_PER_SECOND as f32;
+            Ok((duration, snapped))
+        }
+    }
+
+    pub(super) fn trim(
+        source: &Path,
+        dest: &Path,
+        start: f32,
+        end: f32,
+    ) -> RResult<(f32, f32)> {
+        if start <= 0.05 {
+            match trim_stream_copy_imp(source, dest, start, end) {
+                Ok(v) => Ok(v),
+                Err(copy_err) => {
+                    log::warn!(
+                        "[kage::trim] stream-copy failed ({copy_err}); retrying frame-accurate transcode"
+                    );
+                    let _ = std::fs::remove_file(dest);
+                    trim_precise_imp(source, dest, start, end)
+                }
+            }
+        } else {
+            match trim_precise_imp(source, dest, start, end) {
+                Ok(v) => Ok(v),
+                Err(prec_err) => {
+                    log::warn!(
+                        "[kage::trim] precise trim failed ({prec_err}); falling back to keyframe stream copy"
+                    );
+                    let _ = std::fs::remove_file(dest);
+                    trim_stream_copy_imp(source, dest, start, end)
+                }
+            }
         }
     }
 }
@@ -1230,6 +1667,67 @@ mod tests {
         assert!(super::probe(&part_a).expect("probe part A").duration_seconds > 0.5);
         assert!(super::probe(&part_b).expect("probe part B").duration_seconds > 0.5);
 
+        std::fs::remove_dir_all(&out_dir).ok();
+    }
+
+    #[test]
+    fn suggested_trim_path_in_dir_targets_library_folder() {
+        let lib = temp_dir("lib-target");
+        let ext_dir = temp_dir("ext-src");
+        let ext = ext_dir.join("gameplay.mov");
+        std::fs::write(&ext, b"x").unwrap();
+
+        let p1 = super::suggested_trim_path_in_dir(&lib, &ext);
+        assert_eq!(p1, lib.join("gameplay_trim.mp4"));
+        std::fs::write(&p1, b"y").unwrap();
+        let p2 = super::suggested_trim_path_in_dir(&lib, &ext);
+        assert_eq!(p2, lib.join("gameplay_trim2.mp4"));
+
+        std::fs::remove_dir_all(&lib).ok();
+        std::fs::remove_dir_all(&ext_dir).ok();
+    }
+
+    #[cfg(all(windows, not(feature = "headless-sim")))]
+    #[test]
+    fn real_clip_precise_trim_respects_exact_start_and_end() {
+        let candidate_dirs = [
+            Path::new(r"D:\ClipFlow\valorant-win64-shipping"),
+            Path::new(r"D:\ClipFlow\chrome"),
+        ];
+        let clip = candidate_dirs
+            .iter()
+            .filter_map(|d| std::fs::read_dir(d).ok())
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+                    && p.metadata().map(|m| m.len() > 2_000_000).unwrap_or(false)
+            });
+        let Some(clip) = clip else {
+            return;
+        };
+        let info = super::probe(&clip).expect("probe clip");
+        if info.duration_seconds < 7.0 {
+            return;
+        }
+        let out_dir = temp_dir("precise-trim");
+        let dest = out_dir.join("precise_out.mp4");
+        let res = super::trim_stream_copy(&clip, &dest, 2.35, 5.85).expect("precise trim");
+        assert!(res.size_bytes > 0);
+        assert!(
+            (res.snapped_start_seconds - 2.35).abs() <= 0.15,
+            "expected start near 2.35s, got {}",
+            res.snapped_start_seconds
+        );
+        let probed = super::probe(&dest).expect("probe precise output");
+        assert!(
+            (probed.duration_seconds - 3.5).abs() <= 0.35,
+            "expected trimmed duration near 3.5s, got {}",
+            probed.duration_seconds
+        );
         std::fs::remove_dir_all(&out_dir).ok();
     }
 }

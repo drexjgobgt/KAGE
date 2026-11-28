@@ -186,6 +186,7 @@ pub fn clip_from_write(
         thumbnail: None,
         favorite: false,
         tags: Vec::new(),
+        external: false,
     }
 }
 

@@ -2,6 +2,20 @@
 
 All notable changes to **KAGE Studio** (formerly ClipFlow) are documented here. The project follows [Keep a Changelog](https://keepachangelog.com/) and [Semantic Versioning](https://semver.org/).
 
+## [2.0.3] - 2026-11-28
+
+### Added
+
+- **External video trimming (folder picker + drag & drop)**: Added `open_external_video` command, file picker ("Trim Video File" in Studio and Library), and window-wide drag & drop for external `.mp4`, `.m4v`, and `.mov` files without background capture overhead or loading full files into memory.
+- **Interactive timeline & exact Start/End controls**: Upgraded `ClipTrimmerModal` with a single-axis timeline featuring draggable Start/End handles, editable timecode inputs (`MM:SS.cc` / `HH:MM:SS.cc`), `-0.5s`/`+0.5s` nudge buttons, `Set Start [I]` / `Set End [O]` shortcuts, `Space` play/pause, and immediate decoder cleanup on close.
+
+### Fixed
+
+- **Non-duplicating single-output trim & frame-accurate Start/End**:
+  - `trim_clip` defaults `overwrite = true` for library clips ("Save Trim") so trimming keeps only the resulting clip instead of creating double before/after copies, with an optional "Keep original" checkbox.
+  - External videos save a single trimmed `.mp4` directly to the KAGE library by default ("Save to Library"), or replace the original file in place when opted in.
+  - Added frame-accurate Windows Media Foundation decoded re-encode trimming (`trim_precise_imp`) when trimming mid-stream (`start > 0.05`) so Start and End timestamps match the user selection accurately even across long GOPs.
+
 ## [2.0.2] - 2026-11-26
 
 ### Fixed

@@ -7,6 +7,7 @@ import {
   IconMic,
   IconRecordDot,
   IconSave,
+  IconScissors,
   IconStopSquare,
   IconVolume,
 } from "../components/Icons";
@@ -32,6 +33,7 @@ interface StudioViewProps {
   onDeleteClip: (clip: ClipMetadata) => void;
   onToggleFavorite: (clip: ClipMetadata) => void;
   onOpenLibrary: () => void;
+  onImportVideo: () => void;
   onRetryClips: () => void;
 }
 
@@ -58,6 +60,7 @@ export function StudioView({
   onDeleteClip,
   onToggleFavorite,
   onOpenLibrary,
+  onImportVideo,
   onRetryClips,
 }: StudioViewProps) {
   const armed =
@@ -361,18 +364,28 @@ export function StudioView({
           <div>
             <h2 className="font-display text-2xl text-[#F3ECE4]">Recent Captures</h2>
             <p className="text-xs text-[#94897E]">
-              Open any clip for lossless trimming, frame snapshots, or splitting
+              Open any clip or drag and drop an MP4 or MOV file to trim exact Start and End times
             </p>
           </div>
-          {clips.length > 4 && (
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onOpenLibrary}
-              className="rounded-[8px] border border-[#6E655E] bg-[#12100E] px-3 py-1.5 text-xs font-medium text-[#E6C29F] hover:border-[#E6C29F]"
+              onClick={onImportVideo}
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#E6C29F]/60 bg-[#241D15] px-3 py-1.5 text-xs font-medium text-[#E6C29F] hover:border-[#E6C29F]"
             >
-              View All ({clips.length})
+              <IconScissors className="h-3.5 w-3.5" />
+              <span>Trim Video File</span>
             </button>
-          )}
+            {clips.length > 4 && (
+              <button
+                type="button"
+                onClick={onOpenLibrary}
+                className="rounded-[8px] border border-[#6E655E] bg-[#12100E] px-3 py-1.5 text-xs font-medium text-[#E6C29F] hover:border-[#E6C29F]"
+              >
+                View All ({clips.length})
+              </button>
+            )}
+          </div>
         </div>
 
         {clipsError ? (

@@ -8,6 +8,7 @@ import {
   IconCheck,
   IconCopy,
   IconRefresh,
+  IconScissors,
   IconSearch,
   IconStar,
   IconTag,
@@ -38,6 +39,7 @@ interface LibraryViewProps {
   onBatchTag: (tag: string, remove?: boolean) => void;
   onBatchDelete: () => void;
   onRefresh: () => void;
+  onImportVideo: () => void;
   hotkeySave: string;
   hotkeyRecord: string;
 }
@@ -66,6 +68,7 @@ export function LibraryView({
   onBatchTag,
   onBatchDelete,
   onRefresh,
+  onImportVideo,
   hotkeySave,
   hotkeyRecord,
 }: LibraryViewProps) {
@@ -141,11 +144,20 @@ export function LibraryView({
             Clip Library
           </h1>
           <p className="mt-1.5 font-mono text-xs tabular-nums text-[#94897E]">
-            {filtered.length} of {clips.length} clips ({formatBytes(totalBytes)})
+            {filtered.length} of {clips.length} clips ({formatBytes(totalBytes)}) or drag MP4 / MOV anywhere to trim
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onImportVideo}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#E6C29F] px-3.5 py-1.5 text-xs font-semibold text-[#0A0908] hover:bg-[#F0D2B4]"
+          >
+            <IconScissors className="h-3.5 w-3.5" />
+            <span>Trim Video File</span>
+          </button>
+
           <button
             type="button"
             onClick={onRefresh}

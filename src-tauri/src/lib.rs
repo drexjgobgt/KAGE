@@ -205,6 +205,7 @@ pub fn run() {
             commands::set_buffer_seconds,
             commands::save_instant_replay,
             commands::get_recorded_clips,
+            commands::open_external_video,
             commands::get_clip_thumbnail,
             commands::trim_clip,
             commands::split_clip,

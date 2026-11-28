@@ -20,6 +20,7 @@ pub struct AppState {
     pub engine: Arc<CaptureEngine>,
     pub settings: RwLock<Settings>,
     pub clip_meta: Mutex<ClipMetaStore>,
+    pub imported_videos: RwLock<std::collections::HashSet<PathBuf>>,
 }
 
 impl AppState {
@@ -31,6 +32,7 @@ impl AppState {
             engine: Arc::new(CaptureEngine::new()),
             settings: RwLock::new(settings),
             clip_meta: Mutex::new(ClipMetaStore::load()),
+            imported_videos: RwLock::new(std::collections::HashSet::new()),
         }
     }
 
@@ -297,18 +299,20 @@ where
     unreachable!()
 }
 
+fn is_supported_video_ext(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "mp4" | "m4v" | "mov"))
+}
+
 fn validate_clip_path(output_dir: &Path, raw: &str) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.contains("://") || trimmed.starts_with("\\\\") {
         return Err("Invalid clip path".into());
     }
     let candidate = Path::new(trimmed);
-    let ext_ok = candidate
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("mp4"));
-    if !ext_ok {
-        return Err("Only MP4 files inside the output directory are accessible".into());
+    if !is_supported_video_ext(candidate) {
+        return Err("Only MP4, M4V, or MOV files inside the output directory are accessible".into());
     }
     let canon_root = std::fs::canonicalize(output_dir)
         .map_err(|e| format!("Output folder unavailable: {e}"))?;
@@ -318,6 +322,60 @@ fn validate_clip_path(output_dir: &Path, raw: &str) -> Result<PathBuf, String> {
         return Err("Clip path must reside inside the configured output directory".into());
     }
     Ok(strip_verbatim_prefix(&canon_target))
+}
+
+fn validate_external_source_path(raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.contains("://") || trimmed.starts_with("\\\\") {
+        return Err("Invalid video file path".into());
+    }
+    let candidate = Path::new(trimmed);
+    if !is_supported_video_ext(candidate) {
+        return Err("Unsupported video format. Please select an MP4, M4V, or MOV file.".into());
+    }
+    let clean_raw = trimmed.replace('/', "\\").to_ascii_lowercase();
+    if clean_raw.starts_with("c:\\windows")
+        || clean_raw.starts_with("c:\\program files")
+        || clean_raw.starts_with("c:\\programdata")
+    {
+        return Err("Cannot open videos inside Windows system directories".into());
+    }
+    let canon_target = std::fs::canonicalize(candidate)
+        .map_err(|_| "Video file was not found".to_string())?;
+    let clean = strip_verbatim_prefix(&canon_target);
+    let lower = clean.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+    if lower.starts_with("c:\\windows")
+        || lower.starts_with("c:\\program files")
+        || lower.starts_with("c:\\programdata")
+    {
+        return Err("Cannot open videos inside Windows system directories".into());
+    }
+    if !clean.is_file() {
+        return Err("Selected path is not a video file".into());
+    }
+    Ok(clean)
+}
+
+fn validate_accessible_video_path(
+    output_dir: &Path,
+    imported: &std::collections::HashSet<PathBuf>,
+    raw: &str,
+) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.contains("://") || trimmed.starts_with("\\\\") {
+        return Err("Invalid clip path".into());
+    }
+    let candidate = Path::new(trimmed);
+    if !is_supported_video_ext(candidate) {
+        return Err("Unsupported video file extension".into());
+    }
+    if let Ok(canon_target) = std::fs::canonicalize(candidate) {
+        let clean = strip_verbatim_prefix(&canon_target);
+        if imported.contains(&clean) {
+            return Ok(clean);
+        }
+    }
+    validate_clip_path(output_dir, raw)
 }
 
 fn game_folder_name(exe: &str) -> Option<String> {
@@ -479,14 +537,59 @@ pub struct SplitResult {
 }
 
 #[tauri::command]
+pub async fn open_external_video(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<ClipMetadata, String> {
+    let clean = validate_external_source_path(&path)?;
+    let dir = state.output_dir();
+    let probe_path = clean.clone();
+    let probe_dir = dir.clone();
+    let mut clip = tauri::async_runtime::spawn_blocking(move || {
+        library::metadata_for_file(&probe_path, &probe_dir).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("probe task panicked: {e}"))??;
+
+    if clip.width == 0 || clip.height == 0 || clip.duration_seconds <= 0.05 {
+        return Err("Could not decode video stream metadata from the selected file".into());
+    }
+
+    if clip.external {
+        {
+            let mut imported = state.imported_videos.write();
+            if imported.len() >= 32 {
+                imported.clear();
+            }
+            imported.insert(clean.clone());
+        }
+        if let Err(e) = app.asset_protocol_scope().allow_file(&clean) {
+            log::warn!(
+                "[kage] could not allow imported file preview {}: {e}",
+                clean.display()
+            );
+        }
+    } else {
+        state
+            .clip_meta
+            .lock()
+            .merge_into(&dir, std::slice::from_mut(&mut clip));
+    }
+
+    Ok(clip)
+}
+
+#[tauri::command]
 pub async fn split_clip(
     state: State<'_, AppState>,
     source_path: String,
     at_seconds: f32,
 ) -> Result<SplitResult, String> {
     let dir = state.output_dir();
+    let imported = state.imported_videos.read().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let source = validate_clip_path(&dir, &source_path)?;
+        let source = validate_accessible_video_path(&dir, &imported, &source_path)?;
         let duration = library::probe(&source)
             .map_err(|e| e.to_string())?
             .duration_seconds;
@@ -523,19 +626,26 @@ pub async fn trim_clip(
     start_time: f32,
     end_time: f32,
     overwrite: Option<bool>,
+    dest_in_library: Option<bool>,
 ) -> Result<TrimResult, String> {
     if !start_time.is_finite() || !end_time.is_finite() {
         return Err("invalid trim range".into());
     }
     let dir = state.output_dir();
-    tauri::async_runtime::spawn_blocking(move || {
-        let source = validate_clip_path(&dir, &source_path)?;
-        let overwrite = overwrite.unwrap_or(false);
+    let imported = state.imported_videos.read().clone();
+    let overwrite = overwrite.unwrap_or(true);
+    let dest_in_library = dest_in_library.unwrap_or(false);
+
+    let (source, result) = tauri::async_runtime::spawn_blocking(move || -> Result<(PathBuf, TrimResult), String> {
+        let source = validate_accessible_video_path(&dir, &imported, &source_path)?;
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let dest = if overwrite {
+        let dest = if dest_in_library && !overwrite {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            library::suggested_trim_path_in_dir(&dir, &source)
+        } else if overwrite {
             source.with_extension(format!("trim.{}.{stamp}.tmp.mp4", std::process::id()))
         } else {
             library::suggested_trim_path(&source)
@@ -545,20 +655,55 @@ pub async fn trim_clip(
             .map_err(|e| e.to_string())?;
 
         if overwrite {
-            if let Err(e) = retry_fs_op(|| std::fs::rename(&dest, &source)) {
+            if result.size_bytes == 0 {
                 let _ = std::fs::remove_file(&dest);
-                return Err(e.to_string());
+                return Err("Trim produced an empty output file".into());
             }
-            result.path = source.to_string_lossy().to_string();
-            result.file_name = source
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
+            let is_mp4 = source
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("mp4"));
+            if is_mp4 {
+                if let Err(e) = retry_fs_op(|| std::fs::rename(&dest, &source)) {
+                    let _ = std::fs::remove_file(&dest);
+                    return Err(e.to_string());
+                }
+                result.path = source.to_string_lossy().to_string();
+                result.file_name = source
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+            } else {
+                let mut final_mp4 = source.with_extension("mp4");
+                if final_mp4.exists() {
+                    final_mp4 = library::suggested_trim_path(&source);
+                }
+                if let Err(e) = retry_fs_op(|| std::fs::rename(&dest, &final_mp4)) {
+                    let _ = std::fs::remove_file(&dest);
+                    return Err(e.to_string());
+                }
+                let _ = retry_fs_op(|| std::fs::remove_file(&source));
+                result.path = final_mp4.to_string_lossy().to_string();
+                result.file_name = final_mp4
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+            }
         }
-        Ok(result)
+        Ok((source, result))
     })
     .await
-    .map_err(|e| format!("trim task panicked: {e}"))?
+    .map_err(|e| format!("trim task panicked: {e}"))??;
+
+    let final_path = PathBuf::from(&result.path);
+    if overwrite && final_path != source {
+        let mut imp = state.imported_videos.write();
+        if imp.remove(&source) {
+            imp.insert(final_path);
+        }
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -632,7 +777,9 @@ pub async fn rename_clip(
 
 #[tauri::command]
 pub fn copy_clip_to_clipboard(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    let safe = validate_clip_path(&state.output_dir(), &path)?;
+    let dir = state.output_dir();
+    let imported = state.imported_videos.read();
+    let safe = validate_accessible_video_path(&dir, &imported, &path)?;
     clipboard::copy_files(&[safe])
 }
 
@@ -701,7 +848,9 @@ pub fn reveal_clip_in_folder(
     path: String,
 ) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let safe = validate_clip_path(&state.output_dir(), &path)?;
+    let dir = state.output_dir();
+    let imported = state.imported_videos.read();
+    let safe = validate_accessible_video_path(&dir, &imported, &path)?;
     app.opener()
         .reveal_item_in_dir(safe)
         .map_err(|e| e.to_string())
@@ -724,7 +873,9 @@ pub fn open_clip_external(
     path: String,
 ) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let safe = validate_clip_path(&state.output_dir(), &path)?;
+    let dir = state.output_dir();
+    let imported = state.imported_videos.read();
+    let safe = validate_accessible_video_path(&dir, &imported, &path)?;
     app.opener()
         .open_path(safe.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| e.to_string())
@@ -738,8 +889,9 @@ pub async fn extract_png_frame(
     max_width: Option<u32>,
 ) -> Result<String, String> {
     let dir = state.output_dir();
+    let imported = state.imported_videos.read().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let safe = validate_clip_path(&dir, &path)?;
+        let safe = validate_accessible_video_path(&dir, &imported, &path)?;
         library::extract_frame_png(
             &safe,
             at_seconds.unwrap_or(0.0),
@@ -1430,5 +1582,50 @@ mod tests {
         assert!(!s.starts_with(r"\\?\"), "unexpected verbatim prefix: {s}");
         assert!(safe.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn validate_accessible_video_path_allows_explicit_import_and_blocks_unlisted_external() {
+        let lib_dir = std::env::temp_dir().join(format!("kage-lib-acc-{}", std::process::id()));
+        let ext_dir = std::env::temp_dir().join(format!("kage-ext-acc-{}", std::process::id()));
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        std::fs::create_dir_all(&ext_dir).unwrap();
+
+        let unlisted = ext_dir.join("outside.mov");
+        let imported_file = ext_dir.join("imported.mov");
+        let lib_file = lib_dir.join("clip.mp4");
+        std::fs::write(&unlisted, b"x").unwrap();
+        std::fs::write(&imported_file, b"x").unwrap();
+        std::fs::write(&lib_file, b"x").unwrap();
+
+        let mut imported = std::collections::HashSet::new();
+        assert!(super::validate_accessible_video_path(
+            &lib_dir,
+            &imported,
+            &unlisted.to_string_lossy()
+        )
+        .is_err());
+
+        let clean_import = super::validate_external_source_path(&imported_file.to_string_lossy()).unwrap();
+        imported.insert(clean_import.clone());
+
+        assert_eq!(
+            super::validate_accessible_video_path(
+                &lib_dir,
+                &imported,
+                &imported_file.to_string_lossy()
+            )
+            .unwrap(),
+            clean_import
+        );
+        assert!(super::validate_accessible_video_path(
+            &lib_dir,
+            &imported,
+            &lib_file.to_string_lossy()
+        )
+        .is_ok());
+
+        let _ = std::fs::remove_dir_all(&lib_dir);
+        let _ = std::fs::remove_dir_all(&ext_dir);
     }
 }

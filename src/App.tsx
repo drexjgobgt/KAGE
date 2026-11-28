@@ -138,12 +138,14 @@ export default function App() {
 
   const [activeClip, setActiveClip] = useState<ClipMetadata | null>(null);
   const [activeFlushMs, setActiveFlushMs] = useState<number | undefined>();
+  const [dragOverVideo, setDragOverVideo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sessionSaves, setSessionSaves] = useState(0);
   const [sessionBytes, setSessionBytes] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const toastSeq = useRef(1);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const activeProfileIdRef = useRef(activeProfileId);
@@ -192,6 +194,60 @@ export default function App() {
       setClipsLoading(false);
     }
   }, []);
+
+  const handleOpenExternalPath = useCallback(
+    async (path: string) => {
+      if (!/\.(mp4|m4v|mov)$/i.test(path.trim())) {
+        pushToast("warn", "Unsupported video format", "Drop or select an MP4, M4V, or MOV file.");
+        return;
+      }
+      try {
+        const clip = await kage.openExternalVideo(path);
+        setActiveFlushMs(undefined);
+        setActiveClip(clip);
+      } catch (e) {
+        pushToast("err", "Could not open video", String(e));
+      }
+    },
+    [pushToast],
+  );
+
+  const handleOpenExternalFile = useCallback(
+    async (file: File) => {
+      if (!/\.(mp4|m4v|mov)$/i.test(file.name)) {
+        pushToast("warn", "Unsupported video format", "Select an MP4, M4V, or MOV file.");
+        return;
+      }
+      try {
+        const clip = await kage.registerBrowserVideo(file);
+        setActiveFlushMs(undefined);
+        setActiveClip(clip);
+      } catch (e) {
+        pushToast("err", "Could not open video", String(e));
+      }
+    },
+    [pushToast],
+  );
+
+  const handlePickVideoToTrim = useCallback(async () => {
+    if (!native) {
+      fileInputRef.current?.click();
+      return;
+    }
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        title: "Select video to trim",
+        filters: [{ name: "Video Files", extensions: ["mp4", "m4v", "mov"] }],
+      });
+      if (typeof selected === "string" && selected.length > 0) {
+        await handleOpenExternalPath(selected);
+      }
+    } catch (e) {
+      pushToast("err", "Could not open video picker", String(e));
+    }
+  }, [handleOpenExternalPath, native, pushToast]);
 
   // Bootstrap settings, devices, clips, and simulated engine
   useEffect(() => {
@@ -301,12 +357,35 @@ export default function App() {
         clearThumbnailCache();
       }),
     );
+    attach(
+      kage.onDragEnter(() => {
+        setDragOverVideo(true);
+      }),
+    );
+    attach(
+      kage.onDragLeave(() => {
+        setDragOverVideo(false);
+      }),
+    );
+    attach(
+      kage.onDragDrop((payload) => {
+        setDragOverVideo(false);
+        const paths = payload?.paths;
+        if (!Array.isArray(paths) || paths.length === 0) return;
+        const supported = paths.find((p) => /\.(mp4|m4v|mov)$/i.test(p));
+        if (!supported) {
+          pushToast("warn", "Unsupported file dropped", "Drop an MP4, M4V, or MOV video file to trim.");
+          return;
+        }
+        void handleOpenExternalPath(supported);
+      }),
+    );
 
     return () => {
       disposed = true;
       offs.forEach((off) => off());
     };
-  }, [pushToast, refreshDiskFree]);
+  }, [handleOpenExternalPath, pushToast, refreshDiskFree]);
 
   // Track hidden/minimized visibility for WebView idle cost and disk checks
   useEffect(() => {
@@ -741,7 +820,38 @@ export default function App() {
     settings.profiles.find((p) => p.id === activeProfileId)?.name ?? null;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#0A0908] text-[#F3ECE4]">
+    <div
+      className="flex h-screen w-screen flex-col overflow-hidden bg-[#0A0908] text-[#F3ECE4]"
+      onDragOver={(e) => {
+        if (native) return;
+        if (e.dataTransfer?.types?.includes("Files")) {
+          e.preventDefault();
+          setDragOverVideo(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (native) return;
+        if (e.currentTarget === e.target) setDragOverVideo(false);
+      }}
+      onDrop={(e) => {
+        if (native) return;
+        e.preventDefault();
+        setDragOverVideo(false);
+        const f = e.dataTransfer?.files?.[0];
+        if (f) void handleOpenExternalFile(f);
+      }}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".mp4,.m4v,.mov,video/mp4,video/quicktime"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.currentTarget.files?.[0];
+          e.currentTarget.value = "";
+          if (f) void handleOpenExternalFile(f);
+        }}
+      />
       <TitleBar
         stats={stats}
         minimizeToTray={settings.minimizeToTray}
@@ -786,6 +896,7 @@ export default function App() {
               onDeleteClip={handleDeleteClip}
               onToggleFavorite={handleToggleFavorite}
               onOpenLibrary={() => setTab("library")}
+              onImportVideo={() => void handlePickVideoToTrim()}
               onRetryClips={() => void refreshClips()}
             />
           )}
@@ -864,6 +975,7 @@ export default function App() {
                   .catch((e) => pushToast("err", "Batch delete failed", String(e)))
               }
               onRefresh={() => void refreshClips()}
+              onImportVideo={() => void handlePickVideoToTrim()}
               hotkeySave={settings.hotkeySave}
               hotkeyRecord={settings.hotkeyRecord}
             />
@@ -976,7 +1088,10 @@ export default function App() {
           clip={activeClip}
           flushMs={activeFlushMs}
           onClose={() => setActiveClip(null)}
-          onTrimSaved={() => void refreshClips()}
+          onTrimSaved={() => {
+            void refreshClips();
+            void refreshDiskFree();
+          }}
           onDeleted={handleDeleteClip}
           onRenamed={(oldPath, next) => {
             setClips((prev) =>
@@ -996,6 +1111,18 @@ export default function App() {
           }}
           onToast={pushToast}
         />
+      )}
+
+      {/* Drag-and-drop video import overlay */}
+      {dragOverVideo && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-[#0A0908]/80 backdrop-blur-sm p-6">
+          <div className="rounded-[16px] border-2 border-dashed border-[#E6C29F] bg-[#12100E]/95 px-10 py-8 text-center shadow-2xl">
+            <div className="font-display text-3xl text-[#F3ECE4]">Drop Video to Trim</div>
+            <p className="mt-2 font-mono text-xs text-[#E6C29F]">
+              Supports MP4, M4V, and MOV files without copying into RAM
+            </p>
+          </div>
+        </div>
       )}
 
       {/* Non-blocking live region toasts */}
